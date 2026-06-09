@@ -9,7 +9,7 @@ import random
 from flask import Flask
 
 # --- TERA NAYA TOKEN YAHAN DAALNA ---
-TOKEN = "TERA_NAYA_TOKEN_YAHAN_DAAL"
+TOKEN = "7959029994:AAHTbtrDxr3rjJITEfncORRT82x_Fk_eQW4"
 bot = telebot.TeleBot(TOKEN)
 
 DATA_FILE = "data.json"
