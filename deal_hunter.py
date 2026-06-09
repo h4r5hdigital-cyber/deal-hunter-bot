@@ -9,7 +9,7 @@ import random
 from flask import Flask  # 🔥 NAYA HATHIYAAR: Server ko bewakoof banane ke liye
 
 # --- TERA ASALI TOKEN ---
-TOKEN = "7959029994:AAGFMHKyN4_DA4_DQi99xJfHd8NpsRq7PBM"
+TOKEN = "7959029994:AAHTbtrDxr3rjJITEfncORRT82x_Fk_eQW4"
 bot = telebot.TeleBot(TOKEN)
 
 DATA_FILE = "data.json"
