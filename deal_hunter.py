@@ -6,20 +6,20 @@ import os
 import threading
 import time
 import random
-from flask import Flask  # 🔥 NAYA HATHIYAAR: Server ko bewakoof banane ke liye
+from flask import Flask
 
-# --- TERA ASALI TOKEN ---
-TOKEN = "7959029994:AAHTbtrDxr3rjJITEfncORRT82x_Fk_eQW4"
+# --- TERA NAYA TOKEN YAHAN DAALNA ---
+TOKEN = "TERA_NAYA_TOKEN_YAHAN_DAAL"
 bot = telebot.TeleBot(TOKEN)
 
 DATA_FILE = "data.json"
 
-# --- DUMMY WEBSITE ENGINE ---
+# --- DUMMY WEBSITE ENGINE (Render ko khush rakhne ke liye) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🚀 Harsh ka Deal Hunter Bot 24/7 Zinda Hai!"
+    return "🚀 Harsh ka Deal Hunter Bot 24/7 Zinda Hai! (Anti-Block Enabled)"
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -31,10 +31,20 @@ def save_data(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+# --- NAYA HEAVY ANTI-BOT MASK (Amazon ko bewakoof banane ke liye) ---
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7'
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Cache-Control': 'max-age=0'
 }
+
+def clean_price_text(price_str):
+    """Price mein se faltu symbols aur spaces hatane ka tool"""
+    return float(price_str.replace('₹', '').replace(',', '').replace('.', '').strip())
 
 def auto_price_checker():
     while True:
@@ -45,10 +55,14 @@ def auto_price_checker():
                 try:
                     response = requests.get(item['url'], headers=HEADERS)
                     soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Naya Dual-Check Logic
                     price_element = soup.find("span", class_="a-price-whole")
+                    if not price_element:
+                        price_element = soup.find("span", class_="a-offscreen")
                     
                     if price_element:
-                        current_price = float(price_element.text.replace(',', '').replace('.', '').strip())
+                        current_price = clean_price_text(price_element.text)
                         if current_price < item['start_price']:
                             bot.send_message(
                                 int(chat_id), 
@@ -66,16 +80,21 @@ def handle_message(message):
     chat_id = str(message.chat.id)
     
     if "amazon.in" in user_text or "amzn.in" in user_text or "amzn.to" in user_text:
-        bot.reply_to(message, "⏳ Link mil gaya! Price save kar raha hoon...")
+        bot.reply_to(message, "⏳ Link mil gaya! Firewalls bypass kar raha hoon...")
         try:
             response = requests.get(user_text, headers=HEADERS)
             soup = BeautifulSoup(response.content, 'html.parser')
+            
             title_element = soup.find("span", id="productTitle")
+            
+            # Naya Dual-Check Logic
             price_element = soup.find("span", class_="a-price-whole")
+            if not price_element:
+                price_element = soup.find("span", class_="a-offscreen")
             
             if title_element and price_element:
                 title = title_element.text.strip()
-                clean_price = float(price_element.text.replace(',', '').replace('.', '').strip())
+                clean_price = clean_price_text(price_element.text)
                 
                 data = load_data()
                 if chat_id not in data:
@@ -89,7 +108,7 @@ def handle_message(message):
                 save_data(data)
                 bot.send_message(int(chat_id), f"✅ TRACKING ON!\n📦 {title[:30]}...\n💸 Current: ₹{clean_price}")
             else:
-                bot.send_message(int(chat_id), "❌ Price nahi mila.")
+                bot.send_message(int(chat_id), "❌ Price nahi mila. Amazon ne server block kiya hai, baad mein try karo.")
         except Exception as e:
             bot.send_message(int(chat_id), f"❌ Error: {e}")
     else:
