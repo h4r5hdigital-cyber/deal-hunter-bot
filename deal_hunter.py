@@ -35,24 +35,26 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# === STEALTH HEADERS (Bypass Anti-Bot) ===
-STEALTH_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0'
+# === SEPARATE MASKS (HEADERS) ===
+# Purana mask jo Amazon par 100% kaam kar raha tha
+AMAZON_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Connection": "keep-alive"
+}
+
+# Flipkart ke liye alag mask
+FLIPKART_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
 # === AMAZON SCRAPER ENGINE ===
 def check_amazon_price(url):
     try:
-        response = requests.get(url, headers=STEALTH_HEADERS, timeout=15)
+        response = requests.get(url, headers=AMAZON_HEADERS, timeout=15)
         soup = BeautifulSoup(response.content, "html.parser")
         
         title_element = soup.find("span", id="productTitle")
@@ -70,14 +72,12 @@ def check_amazon_price(url):
 # === FLIPKART SCRAPER ENGINE ===
 def check_flipkart_price(url):
     try:
-        response = requests.get(url, headers=STEALTH_HEADERS, timeout=15)
+        response = requests.get(url, headers=FLIPKART_HEADERS, timeout=15)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # Flipkart titles
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         title = title_element.text.strip() if title_element else "Flipkart Product"
         
-        # Flipkart prices (Purane aur naye dono format)
         price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if price_element:
             price_text = price_element.text.replace("₹", "").replace(",", "").strip()
@@ -163,7 +163,7 @@ def handle_message(message):
         icon = "🛒" if platform == "Flipkart" else "📦"
         bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice girte hi main udta hua notification launga! 🚀", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya Anti-Bot security tight ho. Dusra link try kar.")
+        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya website block kar rahi ho.")
 
 # === BACKGROUND PRICE CHECKER ===
 def auto_price_checker():
