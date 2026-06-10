@@ -12,7 +12,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
-# === FLASK SETUP (FOR UPTIMEROBOT 24/7) ===
+# === FLASK SETUP ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -35,14 +35,24 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+# === STEALTH HEADERS (Bypass Anti-Bot) ===
+STEALTH_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'max-age=0'
+}
+
 # === AMAZON SCRAPER ENGINE ===
 def check_amazon_price(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=STEALTH_HEADERS, timeout=15)
         soup = BeautifulSoup(response.content, "html.parser")
         
         title_element = soup.find("span", id="productTitle")
@@ -59,19 +69,16 @@ def check_amazon_price(url):
 
 # === FLIPKART SCRAPER ENGINE ===
 def check_flipkart_price(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=STEALTH_HEADERS, timeout=15)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # Flipkart ke title aur price classes
+        # Flipkart titles
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         title = title_element.text.strip() if title_element else "Flipkart Product"
         
-        price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd")
+        # Flipkart prices (Purane aur naye dono format)
+        price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if price_element:
             price_text = price_element.text.replace("₹", "").replace(",", "").strip()
             return title, int(price_text)
@@ -91,7 +98,7 @@ def show_list(message):
     data = load_data()
     
     if chat_id not in data or len(data[chat_id]) == 0:
-        bot.reply_to(message, "📭 Teri Wishlist ekdum khali hai bhai! Koi Amazon ya Flipkart link bhej.")
+        bot.reply_to(message, "📭 Teri Wishlist khali hai! Koi Amazon ya Flipkart link bhej.")
         return
     
     response = "📋 **Teri Wishlist & Tracking List:**\n\n"
@@ -120,14 +127,13 @@ def delete_item(message):
             bot.reply_to(message, f"🗑️ Done! Maine **{deleted_item['title'][:30]}...** ko list se hata diya hai.", parse_mode='Markdown')
         else:
             bot.reply_to(message, "❌ Sahi number daal bhai.")
-    except (IndexError, ValueError):
+    except:
         bot.reply_to(message, "❌ Format galat hai. Aise type kar: `/delete 1`")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text.strip()
     
-    # Engine Router
     if "amazon" in url.lower() or "amzn" in url.lower():
         bot.reply_to(message, "🔍 Ek second, Amazon par link check kar raha hoon...")
         title, current_price = check_amazon_price(url)
@@ -157,21 +163,19 @@ def handle_message(message):
         icon = "🛒" if platform == "Flipkart" else "📦"
         bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice girte hi main udta hua notification launga! 🚀", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Link check kar.")
+        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya Anti-Bot security tight ho. Dusra link try kar.")
 
 # === BACKGROUND PRICE CHECKER ===
 def auto_price_checker():
     while True:
-        time.sleep(7200) # Har 2 ghante mein check
+        time.sleep(7200) 
         data = load_data()
         changes_made = False
         
         for chat_id, items in data.items():
             for item in items:
                 try:
-                    # Check which engine to use
                     platform = item.get('platform', 'Amazon')
-                    
                     if platform == "Amazon":
                         title, new_price = check_amazon_price(item['url'])
                     elif platform == "Flipkart":
@@ -187,8 +191,8 @@ def auto_price_checker():
                         )
                         item['start_price'] = new_price
                         changes_made = True
-                except Exception as e:
-                    print("Error in background check:", e)
+                except:
+                    pass
                     
         if changes_made:
             save_data(data)
