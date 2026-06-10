@@ -6,6 +6,7 @@ import os
 import time
 import threading
 from flask import Flask
+from datetime import datetime, timedelta
 
 # === TOKENS & SETUP ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
@@ -34,6 +35,11 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
+
+# === INDIA TIME HELPER ===
+def get_ist_time():
+    # Render server America mein hota hai, isliye +5:30 karke India ka time nikalenge
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 # === AMAZON SCRAPER ENGINE (Direct Stealth Mask) ===
 AMAZON_HEADERS = {
@@ -77,25 +83,17 @@ def check_flipkart_price(url):
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # 1. SMART TITLE FINDER
-        title = "Flipkart Product"
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
-        if title_element:
-            title = title_element.text.strip()
-        elif soup.title:
-            title = soup.title.text.split('|')[0].replace('- Buy', '').strip()
-            
+        title = title_element.text.strip() if title_element else "Flipkart Product"
+        
         if "Request Unsuccessful" in title or "Verify" in title:
             return "Blocked by Security", None
 
-        # 2. SMART PRICE FINDER (Bina Class Name Ke)
-        # Pehle standard classes try karega
         price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if price_element:
             price_text = price_element.text.replace("₹", "").replace(",", "").strip()
             return title, int(price_text)
             
-        # Agar class badal gayi, toh page par har jagah '₹' dhoondhega
         for tag in soup.find_all(['div', 'span']):
             text = tag.text.strip()
             if text.startswith('₹') and len(text) < 15:
@@ -111,7 +109,7 @@ def check_flipkart_price(url):
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/delete - Item hatao")
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price history track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - Price utaar-chadhaw dekho\n/delete [no] - Item hatao")
 
 @bot.message_handler(commands=['list'])
 def show_list(message):
@@ -124,12 +122,52 @@ def show_list(message):
     
     response = "📋 **Teri Wishlist & Tracking List:**\n\n"
     for index, item in enumerate(data[chat_id]):
-        short_title = item['title'][:40] + "..." if len(item['title']) > 40 else item['title']
+        short_title = item['title'][:35] + "..." if len(item['title']) > 35 else item['title']
         platform_icon = "🛒" if item.get('platform') == "Flipkart" else "📦"
-        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current Price: ₹{item['start_price']}\n\n"
+        
+        current_price = item['price_history'][-1]['price']
+        start_price = item['start_price']
+        
+        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price} | Start: ₹{start_price}\n📈 History: `/history {index + 1}`\n\n"
     
     response += "🗑️ Kisi item ko hatane ke liye type kar: `/delete 1`"
     bot.reply_to(message, response, parse_mode='Markdown')
+
+@bot.message_handler(commands=['history'])
+def show_history(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    
+    if chat_id not in data or len(data[chat_id]) == 0:
+        bot.reply_to(message, "📭 List khali hai bhai, history kahan se dikhau!")
+        return
+        
+    try:
+        item_number = int(message.text.split()[1]) - 1
+        if 0 <= item_number < len(data[chat_id]):
+            item = data[chat_id][item_number]
+            
+            response = f"📉 **PRICE HISTORY REPORT**\n"
+            response += f"📦 **Product:** {item['title'][:50]}...\n"
+            response += f"🌐 **Platform:** {item['platform']}\n"
+            response += f"----------------------------------------\n\n"
+            
+            prices = [h['price'] for h in item['price_history']]
+            lowest = min(prices)
+            highest = max(prices)
+            
+            for h in item['price_history']:
+                response += f"• `{h['date']}` → **₹{h['price']}**\n"
+                
+            response += f"\n----------------------------------------\n"
+            response += f"🔥 **Lowest Ever:** ₹{lowest}\n"
+            response += f"📈 **Highest Ever:** ₹{highest}\n"
+            
+            bot.reply_to(message, response, parse_mode='Markdown')
+        else:
+            bot.reply_to(message, "❌ Sahi number daal bhai. Jaise: `/history 1`")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "❌ Aise use kar bhai: `/history 1` (List ka number daal)")
 
 @bot.message_handler(commands=['delete'])
 def delete_item(message):
@@ -173,50 +211,79 @@ def handle_message(message):
         if chat_id not in data:
             data[chat_id] = []
             
+        current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
+        
         data[chat_id].append({
             "url": url,
             "title": title, 
             "start_price": current_price,
-            "platform": platform
+            "platform": platform,
+            "price_history": [{"date": current_time_str, "price": current_price}]
         })
         save_data(data)
         
         icon = "🛒" if platform == "Flipkart" else "📦"
-        bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice girte hi main udta hua notification launga! 🚀", parse_mode='Markdown')
+        bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice ab automatic 6 AM, 12 PM, 6 PM aur 12 AM par check hoga! 🚀", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya link galat ho. Ek baar browser mein check kar le.")
+        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya link galat ho.")
 
-# === BACKGROUND PRICE CHECKER ===
+# === SCHEDULED ROUTINE CHECKER (6AM, 12PM, 6PM, 12AM IST) ===
 def auto_price_checker():
+    checked_keys = set()
     while True:
-        time.sleep(7200) # Har 2 ghante mein check karega
-        data = load_data()
-        changes_made = False
+        # India ka time nikalo
+        ist_now = get_ist_time()
+        current_hour = ist_now.hour
+        current_minute = ist_now.minute
         
-        for chat_id, items in data.items():
-            for item in items:
-                try:
-                    platform = item.get('platform', 'Amazon')
-                    if platform == "Amazon":
-                        title, new_price = check_amazon_price(item['url'])
-                    elif platform == "Flipkart":
-                        title, new_price = check_flipkart_price(item['url'])
-                    else:
-                        continue
-                        
-                    if new_price and new_price < item['start_price']:
-                        icon = "🛒" if platform == "Flipkart" else "📦"
-                        bot.send_message(
-                            chat_id,
-                            f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:50]}...\n📉 Old Price: ₹{item['start_price']}\n🔥 NEW PRICE: ₹{new_price}\n🔗 Buy Now: {item['url']}"
-                        )
-                        item['start_price'] = new_price
-                        changes_made = True
-                except:
-                    pass
+        # Target hours: 0 (12 AM), 6 (6 AM), 12 (12 PM), 18 (6 PM)
+        # Hum pehle 5 minute ke andar check run karenge taaki exact time par hit ho
+        if current_hour in [0, 6, 12, 18] and current_minute < 5:
+            date_key = ist_now.strftime("%Y-%m-%d")
+            check_key = f"{date_key}-{current_hour}"
+            
+            # Ensure ek routine sirf ek hi baar chale
+            if check_key not in checked_keys:
+                print(f"⏰ Routine Time! Running checks for {current_hour}:00 IST")
+                
+                data = load_data()
+                changes_made = False
+                
+                for chat_id, items in data.items():
+                    for item in items:
+                        try:
+                            platform = item.get('platform', 'Amazon')
+                            if platform == "Amazon":
+                                title, new_price = check_amazon_price(item['url'])
+                            elif platform == "Flipkart":
+                                title, new_price = check_flipkart_price(item['url'])
+                            else:
+                                continue
+                                
+                            if new_price:
+                                last_recorded_price = item['price_history'][-1]['price']
+                                
+                                if new_price != last_recorded_price:
+                                    current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
+                                    item['price_history'].append({"date": current_time_str, "price": new_price})
+                                    changes_made = True
+                                
+                                if new_price < last_recorded_price:
+                                    icon = "🛒" if platform == "Flipkart" else "📦"
+                                    bot.send_message(
+                                        chat_id,
+                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:50]}...\n📉 Old Price: ₹{last_recorded_price}\n🔥 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 Buy Now: {item['url']}"
+                                    )
+                        except Exception as e:
+                            print("Error in routine check:", e)
+                            
+                if changes_made:
+                    save_data(data)
                     
-        if changes_made:
-            save_data(data)
+                checked_keys.add(check_key)
+        
+        # CPU ko aaram dene ke liye har 1 minute baad ghadi dekhega
+        time.sleep(60)
 
 # === START ENGINE ===
 if __name__ == "__main__":
@@ -228,5 +295,5 @@ if __name__ == "__main__":
     checker_thread.daemon = True
     checker_thread.start()
     
-    print("🚀 Harsh's Bot is online and ready!")
+    print("🚀 Harsh's Routine Bot is online and ready!")
     bot.infinity_polling()
