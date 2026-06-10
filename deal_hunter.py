@@ -39,7 +39,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE ===
+# === AMAZON SCRAPER ENGINE (With Offer Extraction) ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -55,16 +55,25 @@ def check_amazon_price(url):
         title = title_element.text.strip() if title_element else "Amazon Product"
         
         price_element = soup.find("span", class_="a-price-whole")
+        price = None
         if price_element:
             price_text = price_element.text.replace(",", "").replace(".", "").strip()
-            return title, int(price_text)
-        return title, None
+            price = int(price_text)
+            
+        # Bank Offers nikalne ka logic
+        offers = []
+        for tag in soup.find_all(["span", "div", "a"]):
+            txt = tag.text.strip()
+            if ("Bank Offer" in txt or "Card" in txt or "Discount" in txt) and len(txt) < 80:
+                if txt not in offers and len(txt) > 10:
+                    offers.append(txt)
+                    
+        return title, price, offers[:4]  # Top 4 offers return karenge
     except:
-        return None, None
+        return None, None, []
 
-# === FLIPKART SCRAPER ENGINE ===
+# === FLIPKART SCRAPER ENGINE (With Offer Extraction) ===
 def check_flipkart_price(url):
-    # Teri API key yahan set hai
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
     payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
     
@@ -76,28 +85,39 @@ def check_flipkart_price(url):
         title = title_element.text.strip() if title_element else "Flipkart Product"
         
         if "Request Unsuccessful" in title or "Verify" in title:
-            return "Blocked", None
+            return "Blocked", None, []
 
+        price = None
         price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if price_element:
             price_text = price_element.text.replace("₹", "").replace(",", "").strip()
-            return title, int(price_text)
-            
-        for tag in soup.find_all(['div', 'span']):
-            text = tag.text.strip()
-            if text.startswith('₹') and len(text) < 15:
-                clean_text = text.replace('₹', '').replace(',', '').strip()
-                if clean_text.isdigit(): 
-                    return title, int(clean_text)
+            price = int(price_text)
+        else:
+            for tag in soup.find_all(['div', 'span']):
+                text = tag.text.strip()
+                if text.startswith('₹') and len(text) < 15:
+                    clean_text = text.replace('₹', '').replace(',', '').strip()
+                    if clean_text.isdigit(): 
+                        price = int(clean_text)
+                        break
+                        
+        # Flipkart Bank Offers nikalne ka logic
+        offers = []
+        for tag in soup.find_all(['li', 'span', 'div']):
+            txt = tag.text.strip()
+            if "Bank Offer" in txt and len(txt) < 120:
+                clean_txt = txt.split('\n')[0].strip()
+                if clean_txt not in offers:
+                    offers.append(clean_txt)
                     
-        return title, None
+        return title, price, offers[:4]
     except:
-        return None, None
+        return None, None, []
 
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - History dekho\n/delete [no] - Item hatao\n/reset - Sab kuch delete karo")
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price aur bank offers track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - History dekho\n/delete [no] - Item hatao\n/reset - Sab kuch delete")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -105,7 +125,7 @@ def reset_data(message):
     data = load_data()
     data[chat_id] = []
     save_data(data)
-    bot.reply_to(message, "🔥 🗑️ BOOM! Tera poora database saaf kar diya gaya hai! Ab ek naya fresh link bhej kar check kar.")
+    bot.reply_to(message, "🔥 Database clear! Ab naye links bhej kar check kar.")
 
 @bot.message_handler(commands=['list'])
 def show_list(message):
@@ -113,7 +133,7 @@ def show_list(message):
     data = load_data()
     
     if chat_id not in data or len(data[chat_id]) == 0:
-        bot.reply_to(message, "📭 Teri Wishlist khali hai! Koi Amazon ya Flipkart link bhej.")
+        bot.reply_to(message, "📭 Teri Wishlist khali hai!")
         return
     
     response = "📋 **Teri Wishlist & Tracking List:**\n\n"
@@ -121,17 +141,13 @@ def show_list(message):
         short_title = item['title'][:35] + "..." if len(item['title']) > 35 else item['title']
         platform_icon = "🛒" if item.get('platform') == "Flipkart" else "📦"
         
-        # SMART FIX: Agar purana item hai jisme history nahi hai, toh crash nahi hoga
         if 'price_history' in item and len(item['price_history']) > 0:
             current_price = item['price_history'][-1]['price']
         else:
             current_price = item['start_price']
             
-        start_price = item['start_price']
-        
-        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price} | Start: ₹{start_price}\n📈 History: `/history {index + 1}`\n\n"
+        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n📈 History: `/history {index + 1}`\n\n"
     
-    response += "🗑️ Kisi item ko hatane ke liye type kar: `/delete 1`"
     bot.reply_to(message, response, parse_mode='Markdown')
 
 @bot.message_handler(commands=['history'])
@@ -148,56 +164,54 @@ def show_history(message):
         if 0 <= item_number < len(data[chat_id]):
             item = data[chat_id][item_number]
             
-            # SMART FIX: Purane items handle karna
             if 'price_history' not in item or len(item['price_history']) == 0:
-                bot.reply_to(message, "⚠️ Ye item ka purana version save hua hai jisme history nahi thi. Ise `/delete` karke dobara link bhej!")
+                bot.reply_to(message, "⚠️ Purana data hai. Delete karke naya add kar.")
                 return
                 
             response = f"📉 **PRICE HISTORY REPORT**\n"
-            response += f"📦 **Product:** {item['title'][:50]}...\n"
-            response += f"----------------------------------------\n\n"
-            
-            prices = [h['price'] for h in item['price_history']]
-            lowest = min(prices)
-            highest = max(prices)
+            response += f"📦 **Product:** {item['title'][:50]}...\n----------------------------------------\n\n"
             
             for h in item['price_history']:
                 response += f"• `{h['date']}` → **₹{h['price']}**\n"
                 
-            response += f"\n🔥 **Lowest Ever:** ₹{lowest}\n"
-            response += f"📈 **Highest Ever:** ₹{highest}\n"
+            prices = [h['price'] for h in item['price_history']]
+            response += f"\n🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
+            
+            # Agar offers saved hain toh history mein bhi dikhao
+            if 'latest_offers' in item and item['latest_offers']:
+                response += f"\n💳 **Saved Offers:**\n"
+                for off in item['latest_offers']:
+                    response += f"└ {off}\n"
             
             bot.reply_to(message, response, parse_mode='Markdown')
         else:
-            bot.reply_to(message, "❌ Sahi number daal bhai. Jaise: `/history 1`")
+            bot.reply_to(message, "❌ Sahi number daal bhai.")
     except:
-        bot.reply_to(message, "❌ Aise use kar bhai: `/history 1`")
+        bot.reply_to(message, "❌ Aise use kar: `/history 1`")
 
 @bot.message_handler(commands=['delete'])
 def delete_item(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    if chat_id not in data or len(data[chat_id]) == 0:
-        return bot.reply_to(message, "📭 List khali hai!")
     try:
         item_number = int(message.text.split()[1]) - 1
         deleted_item = data[chat_id].pop(item_number)
         save_data(data)
-        bot.reply_to(message, f"🗑️ Done! Maine **{deleted_item['title'][:30]}...** ko hata diya.")
+        bot.reply_to(message, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
     except:
-        bot.reply_to(message, "❌ Format galat hai. Aise type kar: `/delete 1`")
+        bot.reply_to(message, "❌ Aise type kar: `/delete 1`")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text.strip()
     
     if "amazon" in url.lower() or "amzn" in url.lower():
-        bot.reply_to(message, "🔍 Ek second, Amazon par link check kar raha hoon...")
-        title, current_price = check_amazon_price(url)
+        bot.reply_to(message, "🔍 Amazon par price aur card offers check kar raha hoon...")
+        title, current_price, offers = check_amazon_price(url)
         platform = "Amazon"
     elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
-        bot.reply_to(message, "🔍 Ek second, Flipkart par link check kar raha hoon...")
-        title, current_price = check_flipkart_price(url)
+        bot.reply_to(message, "🔍 Flipkart par price aur card offers check kar raha hoon...")
+        title, current_price, offers = check_flipkart_price(url)
         platform = "Flipkart"
     else:
         bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon aur Flipkart ke links bhej.")
@@ -216,14 +230,25 @@ def handle_message(message):
             "title": title, 
             "start_price": current_price,
             "platform": platform,
-            "price_history": [{"date": current_time_str, "price": current_price}]
+            "price_history": [{"date": current_time_str, "price": current_price}],
+            "latest_offers": offers
         })
         save_data(data)
         
         icon = "🛒" if platform == "Flipkart" else "📦"
-        bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice ab automatic 6 AM, 12 PM, 6 PM aur 12 AM par check hoga! 🚀", parse_mode='Markdown')
+        response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n"
+        
+        if offers:
+            response += "💳 **LIVE BANK / CARD OFFERS:**\n"
+            for off in offers:
+                response += f"• {off}\n"
+        else:
+            response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
+            
+        response += "\nPrice ab automatic routine (6AM, 12PM, 6PM, 12AM) par track hota rahega! 🚀"
+        bot.reply_to(message, response, parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho.")
+        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
 
 # === SCHEDULED ROUTINE CHECKER (6AM, 12PM, 6PM, 12AM) ===
 def auto_price_checker():
@@ -244,18 +269,18 @@ def auto_price_checker():
                         try:
                             platform = item.get('platform', 'Amazon')
                             if platform == "Amazon":
-                                title, new_price = check_amazon_price(item['url'])
+                                title, new_price, offers = check_amazon_price(item['url'])
                             elif platform == "Flipkart":
-                                title, new_price = check_flipkart_price(item['url'])
+                                title, new_price, offers = check_flipkart_price(item['url'])
                             else:
                                 continue
                                 
                             if new_price:
-                                # Self-healing in background check too
                                 if 'price_history' not in item:
                                     item['price_history'] = [{"date": "Old Data", "price": item['start_price']}]
                                     
                                 last_recorded_price = item['price_history'][-1]['price']
+                                item['latest_offers'] = offers  # Offers up-to-date rakhenge
                                 
                                 if new_price != last_recorded_price:
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
