@@ -7,6 +7,7 @@ import time
 import threading
 from flask import Flask
 from datetime import datetime, timedelta
+import re
 
 # === TOKENS & SETUP ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
@@ -39,7 +40,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE (With Offer Extraction) ===
+# === AMAZON SCRAPER ENGINE (Advanced Offer Extraction) ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -60,19 +61,26 @@ def check_amazon_price(url):
             price_text = price_element.text.replace(",", "").replace(".", "").strip()
             price = int(price_text)
             
-        # Bank Offers nikalne ka logic
+        # SMART AMAZON OFFERS
         offers = []
-        for tag in soup.find_all(["span", "div", "a"]):
+        keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
+        for tag in soup.find_all(["span", "li", "div"]):
             txt = tag.text.strip()
-            if ("Bank Offer" in txt or "Card" in txt or "Discount" in txt) and len(txt) < 80:
-                if txt not in offers and len(txt) > 10:
-                    offers.append(txt)
-                    
-        return title, price, offers[:4]  # Top 4 offers return karenge
+            if any(kw in txt for kw in keywords):
+                # Faltu ke button text ko ignore karo
+                if "See All" in txt or "Learn more" in txt or txt == "Offers":
+                    continue
+                # Length badha di hai taaki full detail aaye (20 to 250 chars)
+                if 20 < len(txt) < 250:
+                    clean_txt = " ".join(txt.split()) # Extra space/newlines hatao
+                    if clean_txt not in offers:
+                        offers.append(clean_txt)
+                        
+        return title, price, offers[:5]  # Top 5 detailed offers return karenge
     except:
         return None, None, []
 
-# === FLIPKART SCRAPER ENGINE (With Offer Extraction) ===
+# === FLIPKART SCRAPER ENGINE (Advanced Offer Extraction) ===
 def check_flipkart_price(url):
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
     payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
@@ -101,16 +109,22 @@ def check_flipkart_price(url):
                         price = int(clean_text)
                         break
                         
-        # Flipkart Bank Offers nikalne ka logic
+        # SMART FLIPKART OFFERS (Cashback + Detailed)
         offers = []
+        keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
         for tag in soup.find_all(['li', 'span', 'div']):
             txt = tag.text.strip()
-            if "Bank Offer" in txt and len(txt) < 120:
-                clean_txt = txt.split('\n')[0].strip()
-                if clean_txt not in offers:
-                    offers.append(clean_txt)
-                    
-        return title, price, offers[:4]
+            if any(kw in txt for kw in keywords):
+                # Flipkart mein aakhiri mein "T&C" likha hota hai, usko hata do
+                if "T&C" in txt:
+                    txt = txt.split("T&C")[0]
+                
+                if 15 < len(txt) < 250:
+                    clean_txt = " ".join(txt.split()).strip()
+                    if clean_txt not in offers:
+                        offers.append(clean_txt)
+                        
+        return title, price, offers[:5]
     except:
         return None, None, []
 
@@ -177,7 +191,6 @@ def show_history(message):
             prices = [h['price'] for h in item['price_history']]
             response += f"\n🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
             
-            # Agar offers saved hain toh history mein bhi dikhao
             if 'latest_offers' in item and item['latest_offers']:
                 response += f"\n💳 **Saved Offers:**\n"
                 for off in item['latest_offers']:
@@ -241,11 +254,11 @@ def handle_message(message):
         if offers:
             response += "💳 **LIVE BANK / CARD OFFERS:**\n"
             for off in offers:
-                response += f"• {off}\n"
+                response += f"👉 {off}\n"
         else:
             response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
             
-        response += "\nPrice ab automatic routine (6AM, 12PM, 6PM, 12AM) par track hota rahega! 🚀"
+        response += "\n🚀 Price ab automatic routine par track hota rahega!"
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
@@ -280,7 +293,7 @@ def auto_price_checker():
                                     item['price_history'] = [{"date": "Old Data", "price": item['start_price']}]
                                     
                                 last_recorded_price = item['price_history'][-1]['price']
-                                item['latest_offers'] = offers  # Offers up-to-date rakhenge
+                                item['latest_offers'] = offers  
                                 
                                 if new_price != last_recorded_price:
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
