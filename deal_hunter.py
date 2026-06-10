@@ -61,12 +61,11 @@ def check_amazon_price(url):
         print("Amazon Scraping Error:", e)
         return None, None
 
-# === FLIPKART SCRAPER ENGINE (ScraperAPI + India IP + JS Render) ===
+# === FLIPKART SCRAPER ENGINE (Ultra-Smart Symbol Finder) ===
 def check_flipkart_price(url):
     # 👇 APNI SCRAPER-API KEY YAHAN DAAL 👇
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
     
-    # NAYA UPDATE: India IP aur JS Rendering ON
     payload = {
         'api_key': API_KEY, 
         'url': url, 
@@ -75,17 +74,35 @@ def check_flipkart_price(url):
     }
     
     try:
-        # JS render hone mein thoda time lagta hai, isliye timeout 60 second kar diya hai
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
+        # 1. SMART TITLE FINDER
+        title = "Flipkart Product"
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
-        title = title_element.text.strip() if title_element else "Flipkart Product"
-        
+        if title_element:
+            title = title_element.text.strip()
+        elif soup.title:
+            title = soup.title.text.split('|')[0].replace('- Buy', '').strip()
+            
+        if "Request Unsuccessful" in title or "Verify" in title:
+            return "Blocked by Security", None
+
+        # 2. SMART PRICE FINDER (Bina Class Name Ke)
+        # Pehle standard classes try karega
         price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if price_element:
             price_text = price_element.text.replace("₹", "").replace(",", "").strip()
             return title, int(price_text)
+            
+        # Agar class badal gayi, toh page par har jagah '₹' dhoondhega
+        for tag in soup.find_all(['div', 'span']):
+            text = tag.text.strip()
+            if text.startswith('₹') and len(text) < 15:
+                clean_text = text.replace('₹', '').replace(',', '').strip()
+                if clean_text.isdigit(): 
+                    return title, int(clean_text)
+                    
         return title, None
     except Exception as e:
         print("Flipkart Scraping Error:", e)
