@@ -12,7 +12,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
-# === FLASK SETUP ===
+# === FLASK SETUP (For 24/7 Uptime) ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -35,8 +35,7 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# === SEPARATE MASKS (HEADERS) ===
-# Purana mask jo Amazon par 100% kaam kar raha tha
+# === AMAZON SCRAPER ENGINE (Direct Stealth Mask) ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -45,15 +44,6 @@ AMAZON_HEADERS = {
     "Connection": "keep-alive"
 }
 
-# The Googlebot VIP Mask for Flipkart
-FLIPKART_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Connection": "keep-alive"
-}
-
-# === AMAZON SCRAPER ENGINE ===
 def check_amazon_price(url):
     try:
         response = requests.get(url, headers=AMAZON_HEADERS, timeout=15)
@@ -71,10 +61,15 @@ def check_amazon_price(url):
         print("Amazon Scraping Error:", e)
         return None, None
 
-# === FLIPKART SCRAPER ENGINE ===
+# === FLIPKART SCRAPER ENGINE (ScraperAPI Brahmastra) ===
 def check_flipkart_price(url):
+    # 👇 APNI SCRAPER-API KEY YAHAN DAAL 👇
+    API_KEY = "b96371ea776a13335d3c6fd192254409" 
+    
+    payload = {'api_key': API_KEY, 'url': url}
+    
     try:
-        response = requests.get(url, headers=FLIPKART_HEADERS, timeout=15)
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=20)
         soup = BeautifulSoup(response.content, "html.parser")
         
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
@@ -140,7 +135,7 @@ def handle_message(message):
         bot.reply_to(message, "🔍 Ek second, Amazon par link check kar raha hoon...")
         title, current_price = check_amazon_price(url)
         platform = "Amazon"
-    elif "flipkart" in url.lower() or "fkrt" in url.lower():
+    elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower():
         bot.reply_to(message, "🔍 Ek second, Flipkart par link check kar raha hoon...")
         title, current_price = check_flipkart_price(url)
         platform = "Flipkart"
@@ -165,12 +160,12 @@ def handle_message(message):
         icon = "🛒" if platform == "Flipkart" else "📦"
         bot.reply_to(message, f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice girte hi main udta hua notification launga! 🚀", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya website block kar rahi ho.")
+        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Ho sakta hai item Out of Stock ho ya link galat ho. Ek baar browser mein check kar le.")
 
 # === BACKGROUND PRICE CHECKER ===
 def auto_price_checker():
     while True:
-        time.sleep(7200) 
+        time.sleep(7200) # Har 2 ghante mein check karega
         data = load_data()
         changes_made = False
         
