@@ -61,15 +61,22 @@ def check_amazon_price(url):
         print("Amazon Scraping Error:", e)
         return None, None
 
-# === FLIPKART SCRAPER ENGINE (ScraperAPI Brahmastra) ===
+# === FLIPKART SCRAPER ENGINE (ScraperAPI + India IP + JS Render) ===
 def check_flipkart_price(url):
     # 👇 APNI SCRAPER-API KEY YAHAN DAAL 👇
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
     
-    payload = {'api_key': API_KEY, 'url': url}
+    # NAYA UPDATE: India IP aur JS Rendering ON
+    payload = {
+        'api_key': API_KEY, 
+        'url': url, 
+        'country_code': 'in', 
+        'render': 'true'
+    }
     
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=20)
+        # JS render hone mein thoda time lagta hai, isliye timeout 60 second kar diya hai
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
         title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
@@ -135,8 +142,8 @@ def handle_message(message):
         bot.reply_to(message, "🔍 Ek second, Amazon par link check kar raha hoon...")
         title, current_price = check_amazon_price(url)
         platform = "Amazon"
-    elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower():
-        bot.reply_to(message, "🔍 Ek second, Flipkart par link check kar raha hoon...")
+    elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
+        bot.reply_to(message, "🔍 Ek second, Flipkart par link check kar raha hoon (Isme 10-15 seconds lag sakte hain)...")
         title, current_price = check_flipkart_price(url)
         platform = "Flipkart"
     else:
