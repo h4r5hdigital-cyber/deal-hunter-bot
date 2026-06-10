@@ -107,7 +107,8 @@ def delete_item(message):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text
-    if "amazon" not in url.lower():
+    # Ab bot 'amazon' aur 'amzn' dono ko pehchanega!
+    if "amazon" not in url.lower() and "amzn" not in url.lower():
         bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon ke links bhej.")
         return
         
