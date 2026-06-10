@@ -3,126 +3,171 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import os
-import threading
 import time
-import random
+import threading
 from flask import Flask
 
-# --- TERA NAYA TOKEN YAHAN DAALNA ---
-TOKEN = "7959029994:AAHTbtrDxr3rjJITEfncORRT82x_Fk_eQW4"
-bot = telebot.TeleBot(TOKEN)
-
+# === TOKENS & SETUP ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
-# --- DUMMY WEBSITE ENGINE ---
+# === FLASK SETUP (FOR UPTIMEROBOT 24/7) ===
 app = Flask(__name__)
-
 @app.route('/')
 def home():
-    return "🚀 Harsh ka Deal Hunter Bot 24/7 Zinda Hai! (Ultra Stealth Mode)"
+    return "🚀 Harsh ka Deal Hunter Bot 24/7 Zinda Hai!"
 
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+# === DATABASE FUNCTIONS ===
 def load_data():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
+        with open(DATA_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except:
+                return {}
     return {}
 
 def save_data(data):
-    with open(DATA_FILE, 'w') as f:
+    with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# 🔥 NAYA HATHIYAAR: MULTIPLE MASKS (Har baar naya bhes) 🔥
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/122.0.0.0"
-]
-
-def get_amazon_page(url):
-    """Ye engine asali insaan ki tarah behave karega"""
-    session = requests.Session()
+# === AMAZON SCRAPER FUNCTION ===
+def check_amazon_price(url):
     headers = {
-        'User-Agent': random.choice(USER_AGENTS),  # Har baar random mask
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Connection": "keep-alive"
     }
-    # Thoda human jaisa ruk kar page kholna (1 se 3 second ka wait)
-    time.sleep(random.uniform(1.5, 3.5))
-    response = session.get(url, headers=headers, timeout=15)
-    return response
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        title_element = soup.find("span", id="productTitle")
+        title = title_element.text.strip() if title_element else "Unknown Product"
+        
+        price_element = soup.find("span", class_="a-price-whole")
+        if price_element:
+            price_text = price_element.text.replace(",", "").replace(".", "").strip()
+            return title, int(price_text)
+        return title, None
+    except Exception as e:
+        print("Error scraping:", e)
+        return None, None
 
-def clean_price_text(price_str):
-    return float(price_str.replace('₹', '').replace(',', '').replace('.', '').strip())
+# === BOT COMMANDS ===
 
-def auto_price_checker():
-    while True:
-        data = load_data()
-        for chat_id, items in data.items():
-            for item in items:
-                try:
-                    response = get_amazon_page(item['url'])
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    
-                    price_element = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-offscreen")
-                    
-                    if price_element:
-                        current_price = clean_price_text(price_element.text)
-                        if current_price < item['start_price']:
-                            bot.send_message(
-                                int(chat_id), 
-                                f"🚨🚨 MEGA DEAL ALERT! 🚨🚨\n\n📦 {item['title']}...\n📉 Old Price: ₹{item['start_price']}\n🔥 NEW PRICE: ₹{current_price}\n\nLink: {item['url']}"
-                            )
-                            item['start_price'] = current_price
-                            save_data(data)
-                except Exception:
-                    pass
-        time.sleep(random.randint(3600, 7200))
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/delete - Item hatao")
+
+@bot.message_handler(commands=['list'])
+def show_list(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    
+    if chat_id not in data or len(data[chat_id]) == 0:
+        bot.reply_to(message, "📭 Teri Wishlist ekdum khali hai bhai! Koi Amazon link bhej.")
+        return
+    
+    response = "📋 **Teri Wishlist & Tracking List:**\n\n"
+    for index, item in enumerate(data[chat_id]):
+        # Title lamba ho toh chota kar do
+        short_title = item['title'][:40] + "..." if len(item['title']) > 40 else item['title']
+        response += f"*{index + 1}.* {short_title}\n💰 Current Tracked Price: ₹{item['start_price']}\n\n"
+    
+    response += "🗑️ Kisi item ko hatane ke liye type kar: `/delete 1` (number badal dena)"
+    bot.reply_to(message, response, parse_mode='Markdown')
+
+@bot.message_handler(commands=['delete'])
+def delete_item(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    
+    if chat_id not in data or len(data[chat_id]) == 0:
+        bot.reply_to(message, "📭 Delete karne ke liye kuch hai hi nahi list mein!")
+        return
+    
+    try:
+        item_number = int(message.text.split()[1]) - 1
+        if 0 <= item_number < len(data[chat_id]):
+            deleted_item = data[chat_id].pop(item_number)
+            save_data(data)
+            bot.reply_to(message, f"🗑️ Done! Maine **{deleted_item['title'][:30]}...** ko teri wishlist se hata diya hai.", parse_mode='Markdown')
+        else:
+            bot.reply_to(message, "❌ Sahi number daal bhai. Wishlist check karne ke liye /list type kar.")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "❌ Format galat hai. Aise type kar: `/delete 1`")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    user_text = message.text
-    chat_id = str(message.chat.id)
+    url = message.text
+    if "amazon" not in url.lower():
+        bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon ke links bhej.")
+        return
+        
+    bot.reply_to(message, "🔍 Ek second, Amazon par link check kar raha hoon...")
+    title, current_price = check_amazon_price(url)
     
-    if "amazon.in" in user_text or "amzn.in" in user_text or "amzn.to" in user_text:
-        bot.reply_to(message, "⏳ Link mil gaya! Mask badal kar try kar raha hoon...")
-        try:
-            # Pura naya logic call ho raha hai
-            response = get_amazon_page(user_text)
-            soup = BeautifulSoup(response.content, 'html.parser')
+    if current_price:
+        data = load_data()
+        chat_id = str(message.chat.id)
+        if chat_id not in data:
+            data[chat_id] = []
             
-            title_element = soup.find("span", id="productTitle")
-            price_element = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-offscreen")
-            
-            if title_element and price_element:
-                title = title_element.text.strip()
-                clean_price = clean_price_text(price_element.text)
-                
-                data = load_data()
-                if chat_id not in data:
-                    data[chat_id] = []
-                    
-                data[chat_id].append({
-                    "url": user_text,
-                    "title": title[:30], 
-                    "start_price": clean_price
-                })
-                save_data(data)
-                bot.send_message(int(chat_id), f"✅ TRACKING ON!\n📦 {title[:30]}...\n💸 Current: ₹{clean_price}")
-            else:
-                bot.send_message(int(chat_id), "❌ Price nahi mila. Amazon ka guard abhi tight hai, thodi der baad try kar.")
-        except Exception as e:
-            bot.send_message(int(chat_id), f"❌ Error: {e}")
+        data[chat_id].append({
+            "url": url,
+            "title": title, 
+            "start_price": current_price
+        })
+        save_data(data)
+        bot.reply_to(message, f"✅ **WISHLIST & TRACKING ON**\n📦 {title[:50]}...\n💰 Price: ₹{current_price}\n\nPrice girte hi main udta hua notification launga! 🚀", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "Sirf Amazon links bhej bhai! 🛒")
+        bot.reply_to(message, "❌ Bhai, price nahi mil raha. Link check kar.")
 
-# --- ASALI MAIN ENGINE ---
+# === BACKGROUND PRICE CHECKER ===
+def auto_price_checker():
+    while True:
+        time.sleep(7200) # Har 2 ghante mein check karega (7200 seconds)
+        data = load_data()
+        changes_made = False
+        
+        for chat_id, items in data.items():
+            for item in items:
+                try:
+                    title, new_price = check_amazon_price(item['url'])
+                    if new_price and new_price < item['start_price']:
+                        # BINGO! Price Drop
+                        bot.send_message(
+                            chat_id,
+                            f"🚨🚨 MEGA DEAL ALERT! 🚨🚨\n📦 {item['title'][:50]}...\n📉 Old Price: ₹{item['start_price']}\n🔥 NEW PRICE: ₹{new_price}\n🔗 Buy Now: {item['url']}"
+                        )
+                        # Naya sasta price update kar do
+                        item['start_price'] = new_price
+                        changes_made = True
+                except Exception as e:
+                    print("Error in background check:", e)
+                    
+        if changes_made:
+            save_data(data)
+
+# === START ENGINE ===
 if __name__ == "__main__":
-    threading.Thread(target=auto_price_checker, daemon=True).start()
-    threading.Thread(target=bot.infinity_polling, daemon=True).start()
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    # 1. Start UptimeRobot Flask Server
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # 2. Start Background Price Checker
+    checker_thread = threading.Thread(target=auto_price_checker)
+    checker_thread.daemon = True
+    checker_thread.start()
+    
+    # 3. Start Telegram Bot
+    print("🚀 Harsh's Bot is online and ready!")
+    bot.infinity_polling()
