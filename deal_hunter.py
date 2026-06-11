@@ -21,6 +21,7 @@ try:
     bot.set_my_commands([
         BotCommand("start", "Bot ko zinda karo"),
         BotCommand("list", "Apni Wishlist dekho"),
+        BotCommand("checknow", "Manual check karo (Test)"),
         BotCommand("reset", "Poora database saaf karo")
     ])
 except Exception as e:
@@ -111,8 +112,6 @@ API_KEY = "b96371ea776a13335d3c6fd192254409"
 # === AMAZON HYBRID SCRAPER ===
 def check_amazon_price(url):
     title, price, offers = "Amazon Product", None, []
-    
-    # 1. FAST DIRECT METHOD
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -135,7 +134,6 @@ def check_amazon_price(url):
 
     if price: return title, price, offers[:5]
         
-    # 2. API FALLBACK
     print("Amazon Direct Blocked! Using API Bypass...")
     try:
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
@@ -160,11 +158,9 @@ def check_amazon_price(url):
         return title, price, offers[:5]
     except: return None, None, []
 
-# === FLIPKART DOUBLE HYBRID SCRAPER (NAYA!) ===
+# === FLIPKART DOUBLE HYBRID SCRAPER ===
 def check_flipkart_price(url):
     title, price, offers = "Flipkart Product", None, []
-    
-    # 1. FAST DIRECT METHOD (Naya added, jo 1 second mein layega)
     try:
         response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -197,7 +193,6 @@ def check_flipkart_price(url):
 
     if price: return title, price, offers[:5]
     
-    # 2. API FALLBACK (Bina render ke credit bachane ke liye)
     print("Flipkart Direct Blocked! Using API Bypass...")
     try:
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
@@ -263,7 +258,7 @@ def generate_chart_url(price_history, title):
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/reset - Sab kuch delete")
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/checknow - Manual price update check kar\n/reset - Sab kuch delete")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -272,6 +267,36 @@ def reset_data(message):
     data[chat_id] = []
     save_data(data)
     bot.reply_to(message, "🔥 Database clear! Ab naye links bhej kar check kar.")
+
+# === SECRET ADMIN COMMAND (NEW) ===
+@bot.message_handler(commands=['checknow'])
+def manual_price_check(message):
+    bot.reply_to(message, "⚙️ Backend check shuru kar diya! Prices scrape kar raha hoon, thoda wait kar...")
+    data = load_data()
+    chat_id = str(message.chat.id)
+    
+    if chat_id not in data or not data[chat_id]:
+        bot.reply_to(message, "❌ Teri list khali hai. Pehle koi Flipkart ya Amazon ka link toh bhej!")
+        return
+        
+    for item in data[chat_id]:
+        platform = item.get('platform', 'Amazon')
+        if platform == "Amazon":
+            title, new_price, offers = check_amazon_price(item['url'])
+        elif platform == "Flipkart":
+            title, new_price, offers = check_flipkart_price(item['url'])
+            
+        if new_price:
+            last_recorded_price = item.get('price_history', [{'price': item['start_price']}])[-1]['price']
+            
+            if new_price == last_recorded_price:
+                 bot.send_message(chat_id, f"✅ Check Done! {platform}: {item['title'][:30]}...\nPrice abhi bhi **₹{new_price}** hi hai. Koi farak nahi aaya.")
+            elif new_price < last_recorded_price:
+                 bot.send_message(chat_id, f"🚨 MEGA DEAL ALERT!\n{item['title'][:30]}...\nPrice Gira: ₹{last_recorded_price} ➡️ **₹{new_price}**")
+            elif new_price > last_recorded_price:
+                 bot.send_message(chat_id, f"⚠️ PRICE HIKE!\n{item['title'][:30]}...\nPrice Badh Gaya: ₹{last_recorded_price} ➡️ **₹{new_price}**")
+                 
+    bot.reply_to(message, "✅ Manual check poora ho gaya, report de di maine!")
 
 # === UI WALA LIST COMMAND ===
 @bot.message_handler(commands=['list'])
@@ -391,7 +416,7 @@ def handle_message(message):
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link Out of stock ho sakta hai ya API ki limit khatam ho gayi ho.")
 
-# === SCHEDULED ROUTINE CHECKER ===
+# === SCHEDULED ROUTINE CHECKER (Tere Original Logic Ke Sath) ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -399,9 +424,11 @@ def auto_price_checker():
         current_hour = ist_now.hour
         current_minute = ist_now.minute
         
+        # Din mein 4 baar check karega: 12 AM, 6 AM, 12 PM, 6 PM
         if current_hour in [0, 6, 12, 18] and current_minute < 5:
             check_key = f"{ist_now.strftime('%Y-%m-%d')}-{current_hour}"
             if check_key not in checked_keys:
+                print(f"🔄 Auto-Check start hua (Hour: {current_hour})")
                 data = load_data()
                 changes_made = False
                 
@@ -427,25 +454,28 @@ def auto_price_checker():
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
                                     item['price_history'].append({"date": current_time_str, "price": new_price})
                                     changes_made = True
-                                
-                                icon = "🛒" if platform == "Flipkart" else "📦"
-                                
-                                if new_price < last_recorded_price:
-                                    bot.send_message(
-                                        chat_id,
-                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old: ₹{last_recorded_price}\n🔥 NEW: ₹{new_price}\n🔗 {item['url']}"
-                                    )
-                                elif new_price > last_recorded_price:
-                                    bot.send_message(
-                                        chat_id,
-                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai!\n💰 Old: ₹{last_recorded_price}\n🔺 NEW: ₹{new_price}\n🔗 {item['url']}"
-                                    )
-                        except:
+                                    
+                                    icon = "🛒" if platform == "Flipkart" else "📦"
+                                    
+                                    if new_price < last_recorded_price:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old: ₹{last_recorded_price}\n🔥 NEW: ₹{new_price}\n🔗 {item['url']}"
+                                        )
+                                    elif new_price > last_recorded_price:
+                                        bot.send_message(
+                                            chat_id,
+                                            f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai!\n💰 Old: ₹{last_recorded_price}\n🔺 NEW: ₹{new_price}\n🔗 {item['url']}"
+                                        )
+                        except Exception as e:
+                            print(f"Auto checker error on item: {e}")
                             pass
+                            
                 if changes_made:
                     save_data(data)
                 checked_keys.add(check_key)
-        time.sleep(60)
+                
+        time.sleep(60) # Har 1 minute mein check karega ki time hua hai ya nahi
 
 # === START ENGINE ===
 if __name__ == "__main__":
