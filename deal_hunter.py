@@ -7,7 +7,7 @@ import time
 import threading
 from flask import Flask
 from datetime import datetime, timedelta
-import re
+import urllib.parse
 
 # === TOKENS & SETUP ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
@@ -40,7 +40,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE (Advanced Offer Extraction) ===
+# === AMAZON SCRAPER ENGINE ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -61,26 +61,23 @@ def check_amazon_price(url):
             price_text = price_element.text.replace(",", "").replace(".", "").strip()
             price = int(price_text)
             
-        # SMART AMAZON OFFERS
         offers = []
         keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
         for tag in soup.find_all(["span", "li", "div"]):
             txt = tag.text.strip()
             if any(kw in txt for kw in keywords):
-                # Faltu ke button text ko ignore karo
                 if "See All" in txt or "Learn more" in txt or txt == "Offers":
                     continue
-                # Length badha di hai taaki full detail aaye (20 to 250 chars)
                 if 20 < len(txt) < 250:
-                    clean_txt = " ".join(txt.split()) # Extra space/newlines hatao
+                    clean_txt = " ".join(txt.split())
                     if clean_txt not in offers:
                         offers.append(clean_txt)
                         
-        return title, price, offers[:5]  # Top 5 detailed offers return karenge
+        return title, price, offers[:5]
     except:
         return None, None, []
 
-# === FLIPKART SCRAPER ENGINE (Advanced Offer Extraction) ===
+# === FLIPKART SCRAPER ENGINE ===
 def check_flipkart_price(url):
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
     payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
@@ -109,16 +106,13 @@ def check_flipkart_price(url):
                         price = int(clean_text)
                         break
                         
-        # SMART FLIPKART OFFERS (Cashback + Detailed)
         offers = []
         keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
         for tag in soup.find_all(['li', 'span', 'div']):
             txt = tag.text.strip()
             if any(kw in txt for kw in keywords):
-                # Flipkart mein aakhiri mein "T&C" likha hota hai, usko hata do
                 if "T&C" in txt:
                     txt = txt.split("T&C")[0]
-                
                 if 15 < len(txt) < 250:
                     clean_txt = " ".join(txt.split()).strip()
                     if clean_txt not in offers:
@@ -128,10 +122,40 @@ def check_flipkart_price(url):
     except:
         return None, None, []
 
+# === CHART GENERATOR ENGINE ===
+def generate_chart_url(price_history, title):
+    labels = [h['date'].split()[0] for h in price_history]  
+    data_points = [h['price'] for h in price_history]
+    
+    chart_config = {
+        "type": "line",
+        "data": {
+            "labels": labels,
+            "datasets": [{
+                "label": "Price (₹)",
+                "data": data_points,
+                "borderColor": "rgb(255, 99, 132)", 
+                "backgroundColor": "rgba(255, 99, 132, 0.2)",
+                "fill": True,
+                "tension": 0.4,
+                "pointBackgroundColor": "blue",
+                "pointRadius": 5
+            }]
+        },
+        "options": {
+            "title": {"display": True, "text": title[:40] + "..."},
+            "scales": {
+                "yAxes": [{"ticks": {"beginAtZero": False}}] 
+            }
+        }
+    }
+    encoded_config = urllib.parse.quote(json.dumps(chart_config))
+    return f"https://quickchart.io/chart?c={encoded_config}&w=600&h=400&bkg=white"
+
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price aur bank offers track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - History dekho\n/delete [no] - Item hatao\n/reset - Sab kuch delete")
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop/hike dono track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - Graph History dekho\n/delete [no] - Item hatao\n/reset - Sab kuch delete")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -160,7 +184,7 @@ def show_list(message):
         else:
             current_price = item['start_price']
             
-        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n📈 History: `/history {index + 1}`\n\n"
+        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n📈 Graph History: `/history {index + 1}`\n\n"
     
     bot.reply_to(message, response, parse_mode='Markdown')
 
@@ -182,21 +206,20 @@ def show_history(message):
                 bot.reply_to(message, "⚠️ Purana data hai. Delete karke naya add kar.")
                 return
                 
-            response = f"📉 **PRICE HISTORY REPORT**\n"
-            response += f"📦 **Product:** {item['title'][:50]}...\n----------------------------------------\n\n"
-            
-            for h in item['price_history']:
-                response += f"• `{h['date']}` → **₹{h['price']}**\n"
+            chart_url = generate_chart_url(item['price_history'], item['title'])
                 
+            response = f"📉 **PRICE HISTORY REPORT**\n"
+            response += f"📦 **Product:** {item['title'][:50]}...\n----------------------------------------\n"
+            
             prices = [h['price'] for h in item['price_history']]
-            response += f"\n🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
+            response += f"🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
             
             if 'latest_offers' in item and item['latest_offers']:
                 response += f"\n💳 **Saved Offers:**\n"
                 for off in item['latest_offers']:
                     response += f"└ {off}\n"
             
-            bot.reply_to(message, response, parse_mode='Markdown')
+            bot.send_photo(chat_id, chart_url, caption=response, parse_mode='Markdown')
         else:
             bot.reply_to(message, "❌ Sahi number daal bhai.")
     except:
@@ -258,12 +281,12 @@ def handle_message(message):
         else:
             response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
             
-        response += "\n🚀 Price ab automatic routine par track hota rahega!"
+        response += "\n🚀 Price drop aur hike dono automatic routine par track honge!"
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
 
-# === SCHEDULED ROUTINE CHECKER (6AM, 12PM, 6PM, 12AM) ===
+# === SCHEDULED ROUTINE CHECKER WITH DROP & HIKE ALERTS ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -295,15 +318,26 @@ def auto_price_checker():
                                 last_recorded_price = item['price_history'][-1]['price']
                                 item['latest_offers'] = offers  
                                 
+                                # 1. GRAPH UPDATE LOGIC (Chaye badhe ya ghate, save hoga)
                                 if new_price != last_recorded_price:
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
                                     item['price_history'].append({"date": current_time_str, "price": new_price})
                                     changes_made = True
                                 
+                                icon = "🛒" if platform == "Flipkart" else "📦"
+                                
+                                # 2. PRICE DROP NOTIFICATION
                                 if new_price < last_recorded_price:
                                     bot.send_message(
                                         chat_id,
-                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n💰 Old: ₹{last_recorded_price} | 🔥 NEW: ₹{new_price}\n🔗 {item['url']}"
+                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old Price: ₹{last_recorded_price}\n🔥 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
+                                    )
+                                    
+                                # 3. NAYA FEATURE: PRICE HIKE NOTIFICATION (Price badhne par alert)
+                                elif new_price > last_recorded_price:
+                                    bot.send_message(
+                                        chat_id,
+                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
                                     )
                         except:
                             pass
