@@ -100,27 +100,26 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE (V7.6 BUG FIX) ===
-AMAZON_HEADERS = {
+# === HEADERS ===
+HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8,hi;q=0.7",
     "Connection": "keep-alive"
 }
+API_KEY = "b96371ea776a13335d3c6fd192254409" 
 
+# === AMAZON HYBRID SCRAPER ===
 def check_amazon_price(url):
-    title = "Amazon Product"
-    price = None
-    offers = []
+    title, price, offers = "Amazon Product", None, []
     
     # 1. FAST DIRECT METHOD
     try:
-        response = requests.get(url, headers=AMAZON_HEADERS, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
         
         t_el = soup.find("span", id="productTitle")
         if t_el: title = t_el.text.strip()
         
-        # Multiple Amazon classes try karega
         p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price") or soup.find("span", class_="a-button-text")
         if p_el: 
             clean_price = re.sub(r'[^\d]', '', p_el.text)
@@ -132,17 +131,14 @@ def check_amazon_price(url):
             if any(kw in txt for kw in keywords) and 20 < len(txt) < 250 and "See All" not in txt:
                 clean_txt = " ".join(txt.split())
                 if clean_txt not in offers: offers.append(clean_txt)
-    except:
-        pass
+    except: pass
 
     if price: return title, price, offers[:5]
         
-    # 2. SCRAPER API FALLBACK (Render=True hata diya for Amazon)
-    print("Amazon Direct Blocked! Using API Bypass without Render...")
-    API_KEY = "b96371ea776a13335d3c6fd192254409" 
-    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in'} # NO RENDER FOR AMAZON
+    # 2. API FALLBACK
+    print("Amazon Direct Blocked! Using API Bypass...")
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
+        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
         t_el = soup.find("span", id="productTitle")
@@ -162,35 +158,64 @@ def check_amazon_price(url):
                 if clean_txt not in offers: offers.append(clean_txt)
                 
         return title, price, offers[:5]
-    except Exception as e:
-        print("Amazon API Fallback Error:", e)
-        return None, None, []
+    except: return None, None, []
 
-# === FLIPKART SCRAPER ENGINE ===
+# === FLIPKART DOUBLE HYBRID SCRAPER (NAYA!) ===
 def check_flipkart_price(url):
-    API_KEY = "b96371ea776a13335d3c6fd192254409" 
-    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'} # FLIPKART KO JS RENDER CHAHIYE
+    title, price, offers = "Flipkart Product", None, []
     
+    # 1. FAST DIRECT METHOD (Naya added, jo 1 second mein layega)
     try:
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
+        response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        title_element = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
-        title = title_element.text.strip() if title_element else "Flipkart Product"
-        
-        if "Request Unsuccessful" in title or "Verify" in title: return "Blocked", None, []
+        t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
+        if t_el: title = t_el.text.strip()
 
-        price = None
-        price_element = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
-        if price_element:
-            price_text = price_element.text.replace("₹", "").replace(",", "").strip()
-            price = int(price_text)
+        p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
+        if p_el:
+            clean_price = re.sub(r'[^\d]', '', p_el.text)
+            if clean_price: price = int(clean_price)
         else:
             for tag in soup.find_all(['div', 'span']):
                 text = tag.text.strip()
                 if text.startswith('₹') and len(text) < 15:
-                    clean_text = text.replace('₹', '').replace(',', '').strip()
-                    if clean_text.isdigit(): 
+                    clean_text = re.sub(r'[^\d]', '', text)
+                    if clean_text: 
+                        price = int(clean_text)
+                        break
+                        
+        keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
+        for tag in soup.find_all(['li', 'span', 'div']):
+            txt = tag.text.strip()
+            if any(kw in txt for kw in keywords):
+                if "T&C" in txt: txt = txt.split("T&C")[0]
+                if 15 < len(txt) < 250:
+                    clean_txt = " ".join(txt.split()).strip()
+                    if clean_txt not in offers: offers.append(clean_txt)
+    except: pass
+
+    if price: return title, price, offers[:5]
+    
+    # 2. API FALLBACK (Bina render ke credit bachane ke liye)
+    print("Flipkart Direct Blocked! Using API Bypass...")
+    try:
+        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
+        if t_el: title = t_el.text.strip()
+
+        p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
+        if p_el:
+            clean_price = re.sub(r'[^\d]', '', p_el.text)
+            if clean_price: price = int(clean_price)
+        else:
+            for tag in soup.find_all(['div', 'span']):
+                text = tag.text.strip()
+                if text.startswith('₹') and len(text) < 15:
+                    clean_text = re.sub(r'[^\d]', '', text)
+                    if clean_text: 
                         price = int(clean_text)
                         break
                         
@@ -205,8 +230,7 @@ def check_flipkart_price(url):
                     if clean_txt not in offers: offers.append(clean_txt)
                         
         return title, price, offers[:5]
-    except:
-        return None, None, []
+    except: return None, None, []
 
 # === CHART GENERATOR ENGINE ===
 def generate_chart_url(price_history, title):
@@ -329,7 +353,7 @@ def handle_message(message):
         title, current_price, offers = check_amazon_price(url)
         platform = "Amazon"
     elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
-        bot.reply_to(message, "🔍 Flipkart par check kar raha hoon (Isme 10-15 sec lag sakte hain)...")
+        bot.reply_to(message, "🔍 Flipkart par check kar raha hoon (Isme kuch seconds lag sakte hain)...")
         title, current_price, offers = check_flipkart_price(url)
         platform = "Flipkart"
     else:
@@ -365,7 +389,7 @@ def handle_message(message):
         response += "\n🚀 Price automatic track hoga! Menu se /list dabakar apna item check karo."
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link Out of stock ho sakta hai ya galat hai.")
+        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link Out of stock ho sakta hai ya API ki limit khatam ho gayi ho.")
 
 # === SCHEDULED ROUTINE CHECKER ===
 def auto_price_checker():
@@ -427,5 +451,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Ultimate Fix Edition!")
+    print("🚀 Harsh's Bot Online: Double Hybrid Engine Edition!")
     bot.infinity_polling()
