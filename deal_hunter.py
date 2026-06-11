@@ -14,11 +14,65 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
-# === FLASK SETUP ===
+# === FLASK SETUP (LIVE WEB DASHBOARD) ===
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "🚀 Harsh ka Deal Hunter Bot 24/7 Zinda Hai!"
+    data = load_data()
+    # Ekdam sleek Dark Mode HTML Dashboard
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Harsh's Deal Dashboard</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 30px; }
+            h1 { text-align: center; color: #38bdf8; font-size: 2.5em; text-transform: uppercase; letter-spacing: 2px;}
+            .subtitle { text-align: center; color: #94a3b8; margin-bottom: 40px; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
+            .card { background: #1e293b; padding: 25px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); border-top: 5px solid #38bdf8; transition: transform 0.2s; }
+            .card:hover { transform: translateY(-5px); }
+            .platform { font-size: 0.85em; text-transform: uppercase; letter-spacing: 1.5px; color: #cbd5e1; font-weight: bold; background: #334155; display: inline-block; padding: 4px 10px; border-radius: 20px; margin-bottom: 15px;}
+            .title { font-size: 1.2em; margin: 0 0 15px 0; font-weight: 600; line-height: 1.4; height: 3.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+            .price { font-size: 2.2em; color: #10b981; font-weight: bold; margin: 15px 0; }
+            .btn { display: inline-block; padding: 10px 20px; background: #38bdf8; color: #0f172a; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1em; width: calc(100% - 40px); text-align: center; }
+            .btn:hover { background: #0ea5e9; }
+            .empty {text-align: center; color: #94a3b8; margin-top: 50px; font-size: 1.2em;}
+        </style>
+    </head>
+    <body>
+        <h1>🚀 Harsh's Deal Radar</h1>
+        <div class="subtitle">Live 24/7 Monitoring Dashboard</div>
+        <div class="grid">
+    """
+    has_items = False
+    for chat_id, items in data.items():
+        for item in items:
+            has_items = True
+            title = item.get('title', 'Product')
+            platform = item.get('platform', 'Unknown')
+            # Latest price nikalna
+            if 'price_history' in item and len(item['price_history']) > 0:
+                price = item['price_history'][-1]['price']
+            else:
+                price = item.get('start_price', 0)
+            url = item.get('url', '#')
+            
+            html += f"""
+            <div class="card">
+                <div class="platform">{'🛒 ' if platform == 'Flipkart' else '📦 '}{platform}</div>
+                <div class="title" title="{title}">{title}</div>
+                <div class="price">₹{price}</div>
+                <a href="{url}" target="_blank" class="btn">View Deal</a>
+            </div>
+            """
+            
+    if not has_items:
+        html += "<div class='empty'><h2>Dashboard is empty! Add links via Telegram bot.</h2></div>"
+    
+    html += "</div></body></html>"
+    return html
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
@@ -144,9 +198,7 @@ def generate_chart_url(price_history, title):
         },
         "options": {
             "title": {"display": True, "text": title[:40] + "..."},
-            "scales": {
-                "yAxes": [{"ticks": {"beginAtZero": False}}] 
-            }
+            "scales": {"yAxes": [{"ticks": {"beginAtZero": False}}]}
         }
     }
     encoded_config = urllib.parse.quote(json.dumps(chart_config))
@@ -208,8 +260,7 @@ def show_history(message):
                 
             chart_url = generate_chart_url(item['price_history'], item['title'])
                 
-            response = f"📉 **PRICE HISTORY REPORT**\n"
-            response += f"📦 **Product:** {item['title'][:50]}...\n----------------------------------------\n"
+            response = f"📉 **PRICE HISTORY REPORT**\n📦 **Product:** {item['title'][:50]}...\n----------------------------------------\n"
             
             prices = [h['price'] for h in item['price_history']]
             response += f"🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
@@ -271,22 +322,32 @@ def handle_message(message):
         })
         save_data(data)
         
+        # 🥊 CROSS-PLATFORM RADAR LOGIC
+        short_title = " ".join(title.split()[:4]) # Shuru ke 4 words nikal liye
+        short_title_encoded = urllib.parse.quote(short_title)
+        
+        if platform == "Amazon":
+            rival_url = f"https://www.flipkart.com/search?q={short_title_encoded}"
+            rival_text = f"🥊 **Dono Hath Mein Laddu:**\n👉 [Flipkart Par Sasta Hai Kya? Click Here]({rival_url})"
+        else:
+            rival_url = f"https://www.amazon.in/s?k={short_title_encoded}"
+            rival_text = f"🥊 **Dono Hath Mein Laddu:**\n👉 [Amazon Par Sasta Hai Kya? Click Here]({rival_url})"
+
         icon = "🛒" if platform == "Flipkart" else "📦"
         response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n"
+        
+        response += f"{rival_text}\n\n"
         
         if offers:
             response += "💳 **LIVE BANK / CARD OFFERS:**\n"
             for off in offers:
-                response += f"👉 {off}\n"
-        else:
-            response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
-            
-        response += "\n🚀 Price drop aur hike dono automatic routine par track honge!"
+                response += f"• {off}\n"
+                
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
 
-# === SCHEDULED ROUTINE CHECKER WITH DROP & HIKE ALERTS ===
+# === SCHEDULED ROUTINE CHECKER ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -318,7 +379,6 @@ def auto_price_checker():
                                 last_recorded_price = item['price_history'][-1]['price']
                                 item['latest_offers'] = offers  
                                 
-                                # 1. GRAPH UPDATE LOGIC (Chaye badhe ya ghate, save hoga)
                                 if new_price != last_recorded_price:
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
                                     item['price_history'].append({"date": current_time_str, "price": new_price})
@@ -326,18 +386,15 @@ def auto_price_checker():
                                 
                                 icon = "🛒" if platform == "Flipkart" else "📦"
                                 
-                                # 2. PRICE DROP NOTIFICATION
                                 if new_price < last_recorded_price:
                                     bot.send_message(
                                         chat_id,
                                         f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old Price: ₹{last_recorded_price}\n🔥 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
                                     )
-                                    
-                                # 3. NAYA FEATURE: PRICE HIKE NOTIFICATION (Price badhne par alert)
                                 elif new_price > last_recorded_price:
                                     bot.send_message(
                                         chat_id,
-                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
+                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n🔗 {item['url']}"
                                     )
                         except:
                             pass
@@ -350,4 +407,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
+    print("🚀 Ultimate Startup Edition Online!")
     bot.infinity_polling()
