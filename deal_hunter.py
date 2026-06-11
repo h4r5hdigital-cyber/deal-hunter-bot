@@ -100,7 +100,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE (V7.4 HYBRID: Fast + Bypass) ===
+# === AMAZON SCRAPER ENGINE (V7.6 BUG FIX) ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8,hi;q=0.7",
@@ -120,8 +120,11 @@ def check_amazon_price(url):
         t_el = soup.find("span", id="productTitle")
         if t_el: title = t_el.text.strip()
         
-        p_el = soup.find("span", class_="a-price-whole")
-        if p_el: price = int(p_el.text.replace(",", "").replace(".", "").strip())
+        # Multiple Amazon classes try karega
+        p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price") or soup.find("span", class_="a-button-text")
+        if p_el: 
+            clean_price = re.sub(r'[^\d]', '', p_el.text)
+            if clean_price: price = int(clean_price)
             
         keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
         for tag in soup.find_all(["span", "li", "div"]):
@@ -134,10 +137,10 @@ def check_amazon_price(url):
 
     if price: return title, price, offers[:5]
         
-    # 2. SCRAPER API FALLBACK
-    print("Amazon Direct Blocked! Using API Bypass...")
+    # 2. SCRAPER API FALLBACK (Render=True hata diya for Amazon)
+    print("Amazon Direct Blocked! Using API Bypass without Render...")
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
-    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
+    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in'} # NO RENDER FOR AMAZON
     try:
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -145,10 +148,13 @@ def check_amazon_price(url):
         t_el = soup.find("span", id="productTitle")
         if t_el: title = t_el.text.strip()
         
-        p_el = soup.find("span", class_="a-price-whole")
-        if p_el: price = int(p_el.text.replace(",", "").replace(".", "").strip())
+        p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price")
+        if p_el: 
+            clean_price = re.sub(r'[^\d]', '', p_el.text)
+            if clean_price: price = int(clean_price)
             
         offers = [] 
+        keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
         for tag in soup.find_all(["span", "li", "div"]):
             txt = tag.text.strip()
             if any(kw in txt for kw in keywords) and 20 < len(txt) < 250 and "See All" not in txt:
@@ -156,13 +162,14 @@ def check_amazon_price(url):
                 if clean_txt not in offers: offers.append(clean_txt)
                 
         return title, price, offers[:5]
-    except:
+    except Exception as e:
+        print("Amazon API Fallback Error:", e)
         return None, None, []
 
 # === FLIPKART SCRAPER ENGINE ===
 def check_flipkart_price(url):
     API_KEY = "b96371ea776a13335d3c6fd192254409" 
-    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
+    payload = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'} # FLIPKART KO JS RENDER CHAHIYE
     
     try:
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
@@ -242,7 +249,7 @@ def reset_data(message):
     save_data(data)
     bot.reply_to(message, "🔥 Database clear! Ab naye links bhej kar check kar.")
 
-# === THE NEW UI WALA LIST COMMAND ===
+# === UI WALA LIST COMMAND ===
 @bot.message_handler(commands=['list'])
 def show_list(message):
     chat_id = str(message.chat.id)
@@ -253,7 +260,7 @@ def show_list(message):
         return
     
     response = "📋 **Teri Wishlist & Tracking List:**\n\n"
-    markup = InlineKeyboardMarkup() # ASLI BUTTONS
+    markup = InlineKeyboardMarkup() 
     
     for index, item in enumerate(data[chat_id]):
         short_title = item['title'][:35] + "..." if len(item['title']) > 35 else item['title']
@@ -266,7 +273,6 @@ def show_list(message):
             
         response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n\n"
         
-        # Ek line mein 2 buttons lagayega
         markup.row(
             InlineKeyboardButton(f"📈 Graph {index + 1}", callback_data=f"hist_{index}"),
             InlineKeyboardButton(f"🗑️ Delete {index + 1}", callback_data=f"del_{index}")
@@ -421,5 +427,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Hybrid Scraper + Inline Buttons Edition!")
+    print("🚀 Harsh's Bot Online: Ultimate Fix Edition!")
     bot.infinity_polling()
