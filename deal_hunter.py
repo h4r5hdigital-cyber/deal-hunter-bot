@@ -52,7 +52,6 @@ def home():
             has_items = True
             title = item.get('title', 'Product')
             platform = item.get('platform', 'Unknown')
-            # Latest price nikalna
             if 'price_history' in item and len(item['price_history']) > 0:
                 price = item['price_history'][-1]['price']
             else:
@@ -94,7 +93,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === AMAZON SCRAPER ENGINE ===
+# === AMAZON SCRAPER ENGINE (V7.1 WALA FAST ENGINE) ===
 AMAZON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -322,32 +321,22 @@ def handle_message(message):
         })
         save_data(data)
         
-        # 🥊 CROSS-PLATFORM RADAR LOGIC
-        short_title = " ".join(title.split()[:4]) # Shuru ke 4 words nikal liye
-        short_title_encoded = urllib.parse.quote(short_title)
-        
-        if platform == "Amazon":
-            rival_url = f"https://www.flipkart.com/search?q={short_title_encoded}"
-            rival_text = f"🥊 **Dono Hath Mein Laddu:**\n👉 [Flipkart Par Sasta Hai Kya? Click Here]({rival_url})"
-        else:
-            rival_url = f"https://www.amazon.in/s?k={short_title_encoded}"
-            rival_text = f"🥊 **Dono Hath Mein Laddu:**\n👉 [Amazon Par Sasta Hai Kya? Click Here]({rival_url})"
-
         icon = "🛒" if platform == "Flipkart" else "📦"
         response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n"
-        
-        response += f"{rival_text}\n\n"
         
         if offers:
             response += "💳 **LIVE BANK / CARD OFFERS:**\n"
             for off in offers:
-                response += f"• {off}\n"
-                
+                response += f"👉 {off}\n"
+        else:
+            response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
+            
+        response += "\n🚀 Price drop aur hike dono automatic routine par track honge!"
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
 
-# === SCHEDULED ROUTINE CHECKER ===
+# === SCHEDULED ROUTINE CHECKER WITH DROP & HIKE ALERTS ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -394,7 +383,7 @@ def auto_price_checker():
                                 elif new_price > last_recorded_price:
                                     bot.send_message(
                                         chat_id,
-                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n🔗 {item['url']}"
+                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
                                     )
                         except:
                             pass
@@ -407,5 +396,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Ultimate Startup Edition Online!")
+    print("🚀 Harsh's Bot Online: Stable Fast Edition + Web Dashboard!")
     bot.infinity_polling()
