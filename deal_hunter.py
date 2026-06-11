@@ -1,4 +1,5 @@
 import telebot
+from telebot.types import BotCommand
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -14,12 +15,21 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
+# === BOT MENU SETUP (Bottom Left Button) ===
+try:
+    bot.set_my_commands([
+        BotCommand("start", "Bot ko zinda karo"),
+        BotCommand("list", "Apni Wishlist dekho"),
+        BotCommand("reset", "Poora database saaf karo")
+    ])
+except Exception as e:
+    print("Menu set karne mein error:", e)
+
 # === FLASK SETUP (LIVE WEB DASHBOARD) ===
 app = Flask(__name__)
 @app.route('/')
 def home():
     data = load_data()
-    # Ekdam sleek Dark Mode HTML Dashboard
     html = """
     <!DOCTYPE html>
     <html>
@@ -66,10 +76,8 @@ def home():
                 <a href="{url}" target="_blank" class="btn">View Deal</a>
             </div>
             """
-            
     if not has_items:
         html += "<div class='empty'><h2>Dashboard is empty! Add links via Telegram bot.</h2></div>"
-    
     html += "</div></body></html>"
     return html
 
@@ -206,7 +214,7 @@ def generate_chart_url(price_history, title):
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop/hike dono track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/history [no] - Graph History dekho\n/delete [no] - Item hatao\n/reset - Sab kuch delete")
+    bot.reply_to(message, "🚀 Welcome to Harsh's Deal Hunter!\nAmazon ya Flipkart ka link bhej aur price drop track kar.\n\n🛠️ **Commands:**\n/list - Apni Wishlist dekh\n/reset - Sab kuch delete")
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -222,7 +230,7 @@ def show_list(message):
     data = load_data()
     
     if chat_id not in data or len(data[chat_id]) == 0:
-        bot.reply_to(message, "📭 Teri Wishlist khali hai!")
+        bot.reply_to(message, "📭 Teri Wishlist khali hai! Koi link bhej.")
         return
     
     response = "📋 **Teri Wishlist & Tracking List:**\n\n"
@@ -235,11 +243,13 @@ def show_list(message):
         else:
             current_price = item['start_price']
             
-        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n📈 Graph History: `/history {index + 1}`\n\n"
+        # NAYA: Ek click wale buttons (Underscore magic)
+        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n📈 Graph: /history_{index + 1}  |  🗑️ Delete: /delete_{index + 1}\n\n"
     
     bot.reply_to(message, response, parse_mode='Markdown')
 
-@bot.message_handler(commands=['history'])
+# NAYA: Dynamic handler jo /history_1, /history_2 sabko catch karega
+@bot.message_handler(func=lambda message: message.text and message.text.startswith('/history'))
 def show_history(message):
     chat_id = str(message.chat.id)
     data = load_data()
@@ -249,7 +259,12 @@ def show_history(message):
         return
         
     try:
-        item_number = int(message.text.split()[1]) - 1
+        # Dono support karega: /history 1 aur /history_1
+        if '_' in message.text:
+            item_number = int(message.text.split('_')[1]) - 1
+        else:
+            item_number = int(message.text.split()[1]) - 1
+            
         if 0 <= item_number < len(data[chat_id]):
             item = data[chat_id][item_number]
             
@@ -271,21 +286,30 @@ def show_history(message):
             
             bot.send_photo(chat_id, chart_url, caption=response, parse_mode='Markdown')
         else:
-            bot.reply_to(message, "❌ Sahi number daal bhai.")
+            bot.reply_to(message, "❌ Sahi item nahi chuna bhai.")
     except:
-        bot.reply_to(message, "❌ Aise use kar: `/history 1`")
+        bot.reply_to(message, "❌ List khol kar button pe click kar: /list")
 
-@bot.message_handler(commands=['delete'])
+# NAYA: Dynamic handler jo /delete_1, /delete_2 sabko catch karega
+@bot.message_handler(func=lambda message: message.text and message.text.startswith('/delete'))
 def delete_item(message):
     chat_id = str(message.chat.id)
     data = load_data()
+    
+    if chat_id not in data or len(data[chat_id]) == 0:
+        return bot.reply_to(message, "📭 List khali hai!")
+        
     try:
-        item_number = int(message.text.split()[1]) - 1
+        if '_' in message.text:
+            item_number = int(message.text.split('_')[1]) - 1
+        else:
+            item_number = int(message.text.split()[1]) - 1
+            
         deleted_item = data[chat_id].pop(item_number)
         save_data(data)
         bot.reply_to(message, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
     except:
-        bot.reply_to(message, "❌ Aise type kar: `/delete 1`")
+        bot.reply_to(message, "❌ List khol kar button pe click kar: /list")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -331,12 +355,12 @@ def handle_message(message):
         else:
             response += "💳 *Abhi koi bada bank offer nahi dikha.*\n"
             
-        response += "\n🚀 Price drop aur hike dono automatic routine par track honge!"
+        response += "\n🚀 Price drop aur hike dono automatic track honge! Dekhne ke liye /list dabao."
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link check kar le ek baar.")
 
-# === SCHEDULED ROUTINE CHECKER WITH DROP & HIKE ALERTS ===
+# === SCHEDULED ROUTINE CHECKER ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -378,12 +402,12 @@ def auto_price_checker():
                                 if new_price < last_recorded_price:
                                     bot.send_message(
                                         chat_id,
-                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old Price: ₹{last_recorded_price}\n🔥 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
+                                        f"🚨🚨 {platform.upper()} MEGA DEAL ALERT! 🚨🚨\n{icon} {item['title'][:40]}...\n💰 Old: ₹{last_recorded_price}\n🔥 NEW: ₹{new_price}\n📊 Graph dekho: /history_{data[chat_id].index(item) + 1}\n🔗 {item['url']}"
                                     )
                                 elif new_price > last_recorded_price:
                                     bot.send_message(
                                         chat_id,
-                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai bhai!\n💰 Old Price: ₹{last_recorded_price}\n🔺 NEW PRICE: ₹{new_price}\n📊 History: `/history`\n🔗 {item['url']}"
+                                        f"⚠️⚠️ {platform.upper()} PRICE HIKE ALERT! ⚠️⚠️\n{icon} {item['title'][:40]}...\n📈 Price badh gaya hai!\n💰 Old: ₹{last_recorded_price}\n🔺 NEW: ₹{new_price}\n📊 Graph dekho: /history_{data[chat_id].index(item) + 1}\n🔗 {item['url']}"
                                     )
                         except:
                             pass
@@ -396,5 +420,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Stable Fast Edition + Web Dashboard!")
+    print("🚀 Harsh's Bot Online: 1-Click UI Edition!")
     bot.infinity_polling()
