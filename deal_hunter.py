@@ -179,9 +179,20 @@ def check_amazon_price(url):
         return title, price, []
     except: return None, None, []
 
-# === FLIPKART DOUBLE HYBRID SCRAPER (WITH OOS FIX) ===
+# === FLIPKART DOUBLE HYBRID SCRAPER (PRO OOS FIX) ===
 def check_flipkart_price(url):
     title, price, offers = "Flipkart Product", None, []
+    
+    # 🚨 NAYA OOS DETECTOR ENGINE 🚨
+    def is_flipkart_oos(soup_obj):
+        # Yeh seedha check karega ki kisi tag ka exact text OOS wala toh nahi hai
+        for tag in soup_obj.find_all(['div', 'span', 'button']):
+            text = tag.get_text(strip=True).lower()
+            if text in ["sold out", "currently out of stock", "notify me", "coming soon", "this item is currently out of stock"]:
+                return True
+        return False
+
+    # 1. FAST DIRECT METHOD
     try:
         response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -189,9 +200,8 @@ def check_flipkart_price(url):
         t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         if t_el: title = t_el.text.strip()
 
-        # OOS CHECK (Variant Fix)
-        oos_tag = soup.find(text=re.compile(r'Sold Out|Currently Out of stock|Coming Soon', re.I)) or soup.find("div", class_="_16FRp0")
-        if oos_tag:
+        # 🚨 Agar OOS hai, toh aage price check hi mat karo!
+        if is_flipkart_oos(soup):
             return title, "OOS", []
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
@@ -219,6 +229,7 @@ def check_flipkart_price(url):
 
     if price: return title, price, offers[:5]
     
+    # 2. API FALLBACK
     print("Flipkart Direct Blocked! Using API Bypass...")
     try:
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
@@ -227,15 +238,22 @@ def check_flipkart_price(url):
         t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         if t_el: title = t_el.text.strip()
         
-        # OOS CHECK API
-        oos_tag = soup.find(text=re.compile(r'Sold Out|Currently Out of stock|Coming Soon', re.I)) or soup.find("div", class_="_16FRp0")
-        if oos_tag:
+        # 🚨 API METHOD MEIN BHI OOS CHECK 🚨
+        if is_flipkart_oos(soup):
             return title, "OOS", []
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if p_el:
             clean_price = re.sub(r'[^\d]', '', p_el.text)
             if clean_price: price = int(clean_price)
+        else:
+            for tag in soup.find_all(['div', 'span']):
+                text = tag.text.strip()
+                if text.startswith('₹') and len(text) < 15:
+                    clean_text = re.sub(r'[^\d]', '', text)
+                    if clean_text: 
+                        price = int(clean_text)
+                        break
                         
         return title, price, []
     except: return None, None, []
