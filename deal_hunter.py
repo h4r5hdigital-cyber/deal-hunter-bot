@@ -6,7 +6,7 @@ import json
 import os
 import time
 import threading
-from flask import Flask
+from flask import Flask, redirect, url_for, request
 from datetime import datetime, timedelta
 import urllib.parse
 import re
@@ -27,7 +27,7 @@ try:
 except Exception as e:
     print("Menu set karne mein error:", e)
 
-# === FLASK SETUP (LIVE WEB DASHBOARD) ===
+# === FLASK SETUP (LIVE WEB DASHBOARD & ADMIN PANEL) ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -36,7 +36,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Harsh's Deal Dashboard</title>
+        <title>Harsh's Admin Dashboard</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 30px; }
@@ -48,19 +48,22 @@ def home():
             .platform { font-size: 0.85em; text-transform: uppercase; letter-spacing: 1.5px; color: #cbd5e1; font-weight: bold; background: #334155; display: inline-block; padding: 4px 10px; border-radius: 20px; margin-bottom: 15px;}
             .title { font-size: 1.2em; margin: 0 0 15px 0; font-weight: 600; line-height: 1.4; height: 3.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
             .price { font-size: 2.2em; color: #10b981; font-weight: bold; margin: 15px 0; }
-            .btn { display: inline-block; padding: 10px 20px; background: #38bdf8; color: #0f172a; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1em; width: calc(100% - 40px); text-align: center; }
+            .btn { display: inline-block; padding: 10px; background: #38bdf8; color: #0f172a; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1em; text-align: center; cursor: pointer; border: none; }
             .btn:hover { background: #0ea5e9; }
+            .btn-danger { background: #ef4444; color: white; }
+            .btn-danger:hover { background: #dc2626; }
             .empty {text-align: center; color: #94a3b8; margin-top: 50px; font-size: 1.2em;}
+            .action-buttons { display: flex; gap: 10px; margin-top: 15px; }
         </style>
     </head>
     <body>
-        <h1>🚀 Harsh's Deal Radar</h1>
-        <div class="subtitle">Live 24/7 Monitoring Dashboard</div>
+        <h1>🚀 Harsh's Admin Radar</h1>
+        <div class="subtitle">Live Monitoring & Control Panel</div>
         <div class="grid">
     """
     has_items = False
     for chat_id, items in data.items():
-        for item in items:
+        for index, item in enumerate(items):
             has_items = True
             title = item.get('title', 'Product')
             platform = item.get('platform', 'Unknown')
@@ -75,13 +78,29 @@ def home():
                 <div class="platform">{'🛒 ' if platform == 'Flipkart' else '📦 '}{platform}</div>
                 <div class="title" title="{title}">{title}</div>
                 <div class="price">₹{price}</div>
-                <a href="{url}" target="_blank" class="btn">View Deal</a>
+                <div class="action-buttons">
+                    <a href="{url}" target="_blank" class="btn" style="flex: 1;">View Deal</a>
+                    <form action="/delete/{chat_id}/{index}" method="POST" style="flex: 1; margin: 0; display: flex;">
+                        <button type="submit" class="btn btn-danger" style="width: 100%;">🗑️ Delete</button>
+                    </form>
+                </div>
             </div>
             """
     if not has_items:
         html += "<div class='empty'><h2>Dashboard is empty! Add links via Telegram bot.</h2></div>"
     html += "</div></body></html>"
     return html
+
+@app.route('/delete/<chat_id>/<int:item_index>', methods=['POST'])
+def admin_delete(chat_id, item_index):
+    data = load_data()
+    if chat_id in data and 0 <= item_index < len(data[chat_id]):
+        deleted_item = data[chat_id].pop(item_index)
+        save_data(data)
+        try:
+            bot.send_message(chat_id, f"⚠️ **Admin Action:** Tera item '{deleted_item['title'][:30]}...' list se hata diya gaya hai.")
+        except: pass
+    return redirect(url_for('home'))
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
@@ -109,7 +128,7 @@ HEADERS = {
 }
 API_KEY = "b96371ea776a13335d3c6fd192254409" 
 
-# === AMAZON HYBRID SCRAPER ===
+# === AMAZON HYBRID SCRAPER (WITH OOS FIX) ===
 def check_amazon_price(url):
     title, price, offers = "Amazon Product", None, []
     try:
@@ -119,6 +138,11 @@ def check_amazon_price(url):
         t_el = soup.find("span", id="productTitle")
         if t_el: title = t_el.text.strip()
         
+        # OOS CHECK (Variant Fix)
+        availability = soup.find("div", id="availability")
+        if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
+            return title, "OOS", []
+            
         p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price") or soup.find("span", class_="a-button-text")
         if p_el: 
             clean_price = re.sub(r'[^\d]', '', p_el.text)
@@ -142,23 +166,20 @@ def check_amazon_price(url):
         t_el = soup.find("span", id="productTitle")
         if t_el: title = t_el.text.strip()
         
+        # OOS CHECK API
+        availability = soup.find("div", id="availability")
+        if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
+            return title, "OOS", []
+            
         p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price")
         if p_el: 
             clean_price = re.sub(r'[^\d]', '', p_el.text)
             if clean_price: price = int(clean_price)
             
-        offers = [] 
-        keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
-        for tag in soup.find_all(["span", "li", "div"]):
-            txt = tag.text.strip()
-            if any(kw in txt for kw in keywords) and 20 < len(txt) < 250 and "See All" not in txt:
-                clean_txt = " ".join(txt.split())
-                if clean_txt not in offers: offers.append(clean_txt)
-                
-        return title, price, offers[:5]
+        return title, price, []
     except: return None, None, []
 
-# === FLIPKART DOUBLE HYBRID SCRAPER ===
+# === FLIPKART DOUBLE HYBRID SCRAPER (WITH OOS FIX) ===
 def check_flipkart_price(url):
     title, price, offers = "Flipkart Product", None, []
     try:
@@ -167,6 +188,11 @@ def check_flipkart_price(url):
         
         t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         if t_el: title = t_el.text.strip()
+
+        # OOS CHECK (Variant Fix)
+        oos_tag = soup.find(text=re.compile(r'Sold Out|Currently Out of stock|Coming Soon', re.I)) or soup.find("div", class_="_16FRp0")
+        if oos_tag:
+            return title, "OOS", []
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if p_el:
@@ -200,31 +226,18 @@ def check_flipkart_price(url):
         
         t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
         if t_el: title = t_el.text.strip()
+        
+        # OOS CHECK API
+        oos_tag = soup.find(text=re.compile(r'Sold Out|Currently Out of stock|Coming Soon', re.I)) or soup.find("div", class_="_16FRp0")
+        if oos_tag:
+            return title, "OOS", []
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
         if p_el:
             clean_price = re.sub(r'[^\d]', '', p_el.text)
             if clean_price: price = int(clean_price)
-        else:
-            for tag in soup.find_all(['div', 'span']):
-                text = tag.text.strip()
-                if text.startswith('₹') and len(text) < 15:
-                    clean_text = re.sub(r'[^\d]', '', text)
-                    if clean_text: 
-                        price = int(clean_text)
-                        break
                         
-        offers = []
-        keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
-        for tag in soup.find_all(['li', 'span', 'div']):
-            txt = tag.text.strip()
-            if any(kw in txt for kw in keywords):
-                if "T&C" in txt: txt = txt.split("T&C")[0]
-                if 15 < len(txt) < 250:
-                    clean_txt = " ".join(txt.split()).strip()
-                    if clean_txt not in offers: offers.append(clean_txt)
-                        
-        return title, price, offers[:5]
+        return title, price, []
     except: return None, None, []
 
 # === CHART GENERATOR ENGINE ===
@@ -268,7 +281,6 @@ def reset_data(message):
     save_data(data)
     bot.reply_to(message, "🔥 Database clear! Ab naye links bhej kar check kar.")
 
-# === SECRET ADMIN COMMAND (NEW) ===
 @bot.message_handler(commands=['checknow'])
 def manual_price_check(message):
     bot.reply_to(message, "⚙️ Backend check shuru kar diya! Prices scrape kar raha hoon, thoda wait kar...")
@@ -286,6 +298,10 @@ def manual_price_check(message):
         elif platform == "Flipkart":
             title, new_price, offers = check_flipkart_price(item['url'])
             
+        if new_price == "OOS":
+             bot.send_message(chat_id, f"🚫 **OUT OF STOCK ALERT**\n{item['title'][:30]}...\nYeh item abhi stock se bahar hai. Baad mein check karega.")
+             continue
+             
         if new_price:
             last_recorded_price = item.get('price_history', [{'price': item['start_price']}])[-1]['price']
             
@@ -298,7 +314,6 @@ def manual_price_check(message):
                  
     bot.reply_to(message, "✅ Manual check poora ho gaya, report de di maine!")
 
-# === UI WALA LIST COMMAND ===
 @bot.message_handler(commands=['list'])
 def show_list(message):
     chat_id = str(message.chat.id)
@@ -329,7 +344,6 @@ def show_list(message):
     
     bot.reply_to(message, response, parse_mode='Markdown', reply_markup=markup)
 
-# === BUTTON CLICKS KO HANDLE KARNE WALA ENGINE ===
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = str(call.message.chat.id)
@@ -352,19 +366,13 @@ def handle_query(call):
             
             res = f"📉 **PRICE HISTORY REPORT**\n📦 {item['title'][:50]}...\n----------------------------------------\n"
             res += f"🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
-            
-            if 'latest_offers' in item and item['latest_offers']:
-                res += f"\n💳 **Saved Offers:**\n"
-                for off in item['latest_offers']:
-                    res += f"└ {off}\n"
-                    
             bot.send_photo(chat_id, chart_url, caption=res, parse_mode='Markdown')
             
         elif action == "del":
             deleted_item = data[chat_id].pop(item_number)
             save_data(data)
             bot.answer_callback_query(call.id, "🗑️ Item deleted!")
-            bot.send_message(chat_id, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya. (Nayi list dekhne ke liye /list dabayein)")
+            bot.send_message(chat_id, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
             
     except Exception as e:
         bot.answer_callback_query(call.id, "❌ Kuch error aa gaya.")
@@ -378,13 +386,18 @@ def handle_message(message):
         title, current_price, offers = check_amazon_price(url)
         platform = "Amazon"
     elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
-        bot.reply_to(message, "🔍 Flipkart par check kar raha hoon (Isme kuch seconds lag sakte hain)...")
+        bot.reply_to(message, "🔍 Flipkart par check kar raha hoon...")
         title, current_price, offers = check_flipkart_price(url)
         platform = "Flipkart"
     else:
         bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon aur Flipkart ke links bhej.")
         return
         
+    # OOS CHECK
+    if current_price == "OOS":
+        bot.reply_to(message, "❌ **Bhai, tera bheja hua variant/color abhi OUT OF STOCK hai!**\nMain galat in-stock variant ka price nahi uthaunga, isliye maine isko list mein add nahi kiya.")
+        return
+
     if current_price:
         data = load_data()
         chat_id = str(message.chat.id)
@@ -405,26 +418,19 @@ def handle_message(message):
         
         icon = "🛒" if platform == "Flipkart" else "📦"
         response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n"
-        
-        if offers:
-            response += "💳 **LIVE BANK / CARD OFFERS:**\n"
-            for off in offers:
-                response += f"👉 {off}\n"
-            
-        response += "\n🚀 Price automatic track hoga! Menu se /list dabakar apna item check karo."
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link Out of stock ho sakta hai ya API ki limit khatam ho gayi ho.")
+        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link me error ho sakta hai ya API ki limit khatam ho gayi ho.")
 
-# === SCHEDULED ROUTINE CHECKER (Tere Original Logic Ke Sath) ===
+# === SCHEDULED ROUTINE CHECKER (WITH 30-DAY AUTO DELETE) ===
 def auto_price_checker():
     checked_keys = set()
     while True:
         ist_now = get_ist_time()
         current_hour = ist_now.hour
         current_minute = ist_now.minute
+        current_year = ist_now.year 
         
-        # Din mein 4 baar check karega: 12 AM, 6 AM, 12 PM, 6 PM
         if current_hour in [0, 6, 12, 18] and current_minute < 5:
             check_key = f"{ist_now.strftime('%Y-%m-%d')}-{current_hour}"
             if check_key not in checked_keys:
@@ -432,6 +438,31 @@ def auto_price_checker():
                 data = load_data()
                 changes_made = False
                 
+                # 30-DAY AUTO DELETE
+                for chat_id in list(data.keys()):
+                    valid_items = []
+                    for item in data[chat_id]:
+                        is_expired = False
+                        if 'price_history' in item and len(item['price_history']) > 0:
+                            first_date_str = item['price_history'][0]['date']
+                            if first_date_str != "Old Data":
+                                try:
+                                    added_date = datetime.strptime(f"{first_date_str} {current_year}", "%d-%b %I:%M %p %Y")
+                                    if (ist_now - added_date).days >= 30:
+                                        is_expired = True
+                                except: pass
+                                
+                        if is_expired:
+                            changes_made = True
+                            try:
+                                bot.send_message(chat_id, f"⏳ **Tracking Expired!**\n30 din poore ho gaye, maine yeh item hata diya hai:\n🗑️ {item['title'][:40]}...")
+                            except: pass
+                        else:
+                            valid_items.append(item) 
+                            
+                    data[chat_id] = valid_items 
+                
+                # SCRAPING LOOP
                 for chat_id, items in data.items():
                     for item in items:
                         try:
@@ -443,12 +474,15 @@ def auto_price_checker():
                             else:
                                 continue
                                 
+                            # OOS HANDLE KAREGA
+                            if new_price == "OOS":
+                                continue
+                                
                             if new_price:
                                 if 'price_history' not in item:
                                     item['price_history'] = [{"date": "Old Data", "price": item['start_price']}]
                                     
                                 last_recorded_price = item['price_history'][-1]['price']
-                                item['latest_offers'] = offers  
                                 
                                 if new_price != last_recorded_price:
                                     current_time_str = get_ist_time().strftime("%d-%b %I:%M %p")
@@ -475,11 +509,11 @@ def auto_price_checker():
                     save_data(data)
                 checked_keys.add(check_key)
                 
-        time.sleep(60) # Har 1 minute mein check karega ki time hua hai ya nahi
+        time.sleep(60) 
 
 # === START ENGINE ===
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Double Hybrid Engine Edition!")
+    print("🚀 Harsh's Bot Online: Double Hybrid + Admin Panel + OOS Fix Edition!")
     bot.infinity_polling()
