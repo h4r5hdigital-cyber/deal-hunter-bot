@@ -155,10 +155,11 @@ def check_amazon_price(url):
             clean_price = re.sub(r'[^\d]', '', p_el.text)
             if clean_price: price = int(clean_price)
             
-        keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
+        keywords = ["discount", "card", "cashback", "bank offer", "emi"]
         for tag in soup.find_all(["span", "li", "div"]):
             txt = tag.text.strip()
-            if any(kw in txt for kw in keywords) and 20 < len(txt) < 250 and "See All" not in txt:
+            txt_lower = txt.lower()
+            if any(kw in txt_lower for kw in keywords) and 20 < len(txt) < 250 and "see all" not in txt_lower:
                 clean_txt = " ".join(txt.split())
                 if clean_txt not in offers: offers.append(clean_txt)
     except: pass
@@ -185,18 +186,18 @@ def check_amazon_price(url):
             clean_price = re.sub(r'[^\d]', '', p_el.text)
             if clean_price: price = int(clean_price)
             
-        # API MEIN BHI OFFERS SCRAPE KAREGA (FIXED)
-        keywords = ["Discount", "Card", "Cashback", "Bank Offer", "EMI"]
+        keywords = ["discount", "card", "cashback", "bank offer", "emi"]
         for tag in soup.find_all(["span", "li", "div"]):
             txt = tag.text.strip()
-            if any(kw in txt for kw in keywords) and 20 < len(txt) < 250 and "See All" not in txt:
+            txt_lower = txt.lower()
+            if any(kw in txt_lower for kw in keywords) and 20 < len(txt) < 250 and "see all" not in txt_lower:
                 clean_txt = " ".join(txt.split())
                 if clean_txt not in offers: offers.append(clean_txt)
                 
         return title, price, offers[:5]
     except: return None, None, []
 
-# === FLIPKART DOUBLE HYBRID SCRAPER ===
+# === FLIPKART DOUBLE HYBRID SCRAPER (UPGRADED OFFER DETECTOR) ===
 def check_flipkart_price(url):
     title, price, offers = "Flipkart Product", None, []
     
@@ -234,10 +235,12 @@ def check_flipkart_price(url):
                             price = val
                             break
                         
-        keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
-        for tag in soup.find_all(['li', 'span', 'div']):
+        # 🚨 FLIPKART AGGRESSIVE OFFER SCRAPER 🚨
+        keywords = ["bank offer", "cashback", "special price", "partner offer", "discount"]
+        for tag in soup.find_all(['li', 'span', 'div', 'p']):
             txt = tag.text.strip()
-            if any(kw in txt for kw in keywords):
+            txt_lower = txt.lower() # Case insensitive match
+            if any(kw in txt_lower for kw in keywords):
                 if "T&C" in txt: txt = txt.split("T&C")[0]
                 if 15 < len(txt) < 250:
                     clean_txt = " ".join(txt.split()).strip()
@@ -274,11 +277,12 @@ def check_flipkart_price(url):
                             price = val
                             break
                             
-        # API MEIN BHI OFFERS SCRAPE KAREGA (FIXED)
-        keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
-        for tag in soup.find_all(['li', 'span', 'div']):
+        # 🚨 FLIPKART API AGGRESSIVE SCRAPER 🚨
+        keywords = ["bank offer", "cashback", "special price", "partner offer", "discount"]
+        for tag in soup.find_all(['li', 'span', 'div', 'p']):
             txt = tag.text.strip()
-            if any(kw in txt for kw in keywords):
+            txt_lower = txt.lower()
+            if any(kw in txt_lower for kw in keywords):
                 if "T&C" in txt: txt = txt.split("T&C")[0]
                 if 15 < len(txt) < 250:
                     clean_txt = " ".join(txt.split()).strip()
@@ -352,7 +356,6 @@ def manual_price_check(message):
         if new_price:
             last_recorded_price = item.get('price_history', [{'price': item['start_price']}])[-1]['price']
             
-            # Update offers in database
             if offers: item['latest_offers'] = offers
             
             if new_price == last_recorded_price:
@@ -362,9 +365,10 @@ def manual_price_check(message):
             elif new_price > last_recorded_price:
                  bot.send_message(chat_id, f"⚠️ PRICE HIKE!\n{item['title'][:30]}...\nPrice Badh Gaya: ₹{last_recorded_price} ➡️ **₹{new_price}**")
     
-    save_data(data) # Save updated offers
+    save_data(data)
     bot.reply_to(message, "✅ Manual check poora ho gaya, report de di maine!")
 
+# 🏆 NEW UI: THE 3 BUTTON LAYOUT (Graph | Offers | Delete)
 @bot.message_handler(commands=['list'])
 def show_list(message):
     chat_id = str(message.chat.id)
@@ -385,18 +389,13 @@ def show_list(message):
         else:
             current_price = item['start_price']
             
-        # 🎁 OFFERS SHOW KARNE KA LOGIC (LIST MEIN)
-        offers_list = item.get('latest_offers', [])
-        if offers_list:
-            offers_text = "\n\n🎁 *Top Offers:*\n" + "\n".join([f"▪️ {o}" for o in offers_list[:3]])
-        else:
-            offers_text = ""
-            
-        res = f"{platform_icon} *{short_title}*\n💰 Current: ₹{current_price}{offers_text}"
+        res = f"{platform_icon} *{short_title}*\n💰 Current: ₹{current_price}"
         
         markup = InlineKeyboardMarkup()
+        # 3 Buttons in a single row
         markup.row(
             InlineKeyboardButton(f"📈 Graph", callback_data=f"hist_{index}"),
+            InlineKeyboardButton(f"🎁 Offers", callback_data=f"off_{index}"),
             InlineKeyboardButton(f"🗑️ Delete", callback_data=f"del_{index}")
         )
         
@@ -425,6 +424,18 @@ def handle_query(call):
             res = f"📉 **PRICE HISTORY REPORT**\n📦 {item['title'][:50]}...\n----------------------------------------\n"
             res += f"🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
             bot.send_photo(chat_id, chart_url, caption=res, parse_mode='Markdown')
+            
+        # 🎁 NEW: OFFERS BUTTON ACTION
+        elif action == "off":
+            offers_list = item.get('latest_offers', [])
+            if offers_list:
+                bot.answer_callback_query(call.id, "🎁 Offers nikal raha hoon...")
+                offers_text = "\n\n".join([f"▪️ {o}" for o in offers_list])
+                msg = f"🎁 **Top Offers For:**\n📦 {item['title'][:40]}...\n\n{offers_text}"
+                bot.send_message(chat_id, msg, parse_mode='Markdown')
+            else:
+                # Agar offer blank hai toh screen pe chhota sa alert aayega
+                bot.answer_callback_query(call.id, "Abhi is par koi khaas Bank Offer nahi dikh raha bhai!", show_alert=True)
             
         elif action == "del":
             deleted_item = data[chat_id].pop(item_number)
@@ -488,14 +499,7 @@ def handle_message(message):
         save_data(data)
         
         icon = "🛒" if platform == "Flipkart" else "📦"
-        
-        # 🎁 OFFERS SHOW KARNE KA LOGIC (ADD KARTE TIME)
-        if offers:
-            offers_text = "\n\n🎁 **Top Offers:**\n" + "\n".join([f"▪️ {o}" for o in offers[:4]])
-        else:
-            offers_text = "\n\n🎁 **Offers:** Abhi koi khaas card ya EMI offer nahi dikh raha."
-
-        response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}{offers_text}\n"
+        response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n*💡 Bank Offers dekhne ke liye /list daba aur '🎁 Offers' button click kar.*"
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
         bot.reply_to(message, "⚠️ Bhai lagta hai server thoda busy hai ya timeout ho gaya. Ek baar fir se link bhej de!")
@@ -568,7 +572,6 @@ def auto_price_checker():
                             item['error_count'] = 0
                                 
                             if new_price:
-                                # Update offers automatically on routine check
                                 if offers: item['latest_offers'] = offers
                                 
                                 if 'price_history' not in item:
@@ -607,5 +610,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Offers Visible Edition!")
+    print("🚀 Harsh's Bot Online: Offers Button Edition!")
     bot.infinity_polling()
