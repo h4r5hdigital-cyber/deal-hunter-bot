@@ -13,6 +13,8 @@ import re
 
 # === TOKENS & SETUP ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+# APNI ADMIN CHAT ID YAHAN DAAL (Error alerts ke liye)
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "TERA_CHAT_ID_YAHAN_DAAL") 
 bot = telebot.TeleBot(BOT_TOKEN)
 DATA_FILE = "data.json"
 
@@ -128,17 +130,22 @@ HEADERS = {
 }
 API_KEY = "b96371ea776a13335d3c6fd192254409" 
 
-# === AMAZON HYBRID SCRAPER (WITH OOS FIX) ===
+# === AMAZON HYBRID SCRAPER (WITH OOS FIX & RENDER=TRUE) ===
 def check_amazon_price(url):
     title, price, offers = "Amazon Product", None, []
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        t_el = soup.find("span", id="productTitle")
-        if t_el: title = t_el.text.strip()
+        # Bug 12: og:title for better exact name
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        else:
+            t_el = soup.find("span", id="productTitle")
+            if t_el: title = t_el.text.strip()
         
-        # OOS CHECK (Variant Fix)
+        # OOS CHECK
         availability = soup.find("div", id="availability")
         if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
             return title, "OOS", []
@@ -158,15 +165,19 @@ def check_amazon_price(url):
 
     if price: return title, price, offers[:5]
         
-    print("Amazon Direct Blocked! Using API Bypass...")
+    print("Amazon Direct Blocked! Using API Bypass with render=true...")
     try:
-        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
+        # Bug 10 & 11 Fix: render=true added for Javascript & Variants
+        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        t_el = soup.find("span", id="productTitle")
-        if t_el: title = t_el.text.strip()
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        else:
+            t_el = soup.find("span", id="productTitle")
+            if t_el: title = t_el.text.strip()
         
-        # OOS CHECK API
         availability = soup.find("div", id="availability")
         if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
             return title, "OOS", []
@@ -179,13 +190,11 @@ def check_amazon_price(url):
         return title, price, []
     except: return None, None, []
 
-# === FLIPKART DOUBLE HYBRID SCRAPER (PRO OOS FIX) ===
+# === FLIPKART DOUBLE HYBRID SCRAPER (STRICT FILTERS + OOS + RENDER) ===
 def check_flipkart_price(url):
     title, price, offers = "Flipkart Product", None, []
     
-    # 🚨 NAYA OOS DETECTOR ENGINE 🚨
     def is_flipkart_oos(soup_obj):
-        # Yeh seedha check karega ki kisi tag ka exact text OOS wala toh nahi hai
         for tag in soup_obj.find_all(['div', 'span', 'button']):
             text = tag.get_text(strip=True).lower()
             if text in ["sold out", "currently out of stock", "notify me", "coming soon", "this item is currently out of stock"]:
@@ -197,10 +206,14 @@ def check_flipkart_price(url):
         response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
-        if t_el: title = t_el.text.strip()
+        # Bug 6 & 12 Fix: og:title will always extract correct variant name even if class changes
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        else:
+            t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
+            if t_el: title = t_el.text.strip()
 
-        # 🚨 Agar OOS hai, toh aage price check hi mat karo!
         if is_flipkart_oos(soup):
             return title, "OOS", []
 
@@ -214,8 +227,11 @@ def check_flipkart_price(url):
                 if text.startswith('₹') and len(text) < 15:
                     clean_text = re.sub(r'[^\d]', '', text)
                     if clean_text: 
-                        price = int(clean_text)
-                        break
+                        val = int(clean_text)
+                        # Bug 3 & 4 Fix: Ignore EMI and cheap accessories < 500 Rs
+                        if val > 500:
+                            price = val
+                            break
                         
         keywords = ["Bank Offer", "Cashback", "Special Price", "Partner Offer", "Discount"]
         for tag in soup.find_all(['li', 'span', 'div']):
@@ -229,16 +245,19 @@ def check_flipkart_price(url):
 
     if price: return title, price, offers[:5]
     
-    # 2. API FALLBACK
-    print("Flipkart Direct Blocked! Using API Bypass...")
+    # 2. API FALLBACK WITH RENDER=TRUE
+    print("Flipkart Direct Blocked! Using API Bypass with render=true...")
     try:
-        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
+        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
-        if t_el: title = t_el.text.strip()
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        else:
+            t_el = soup.find("span", class_="B_NuCI") or soup.find("span", class_="VU-Tbw")
+            if t_el: title = t_el.text.strip()
         
-        # 🚨 API METHOD MEIN BHI OOS CHECK 🚨
         if is_flipkart_oos(soup):
             return title, "OOS", []
 
@@ -252,8 +271,10 @@ def check_flipkart_price(url):
                 if text.startswith('₹') and len(text) < 15:
                     clean_text = re.sub(r'[^\d]', '', text)
                     if clean_text: 
-                        price = int(clean_text)
-                        break
+                        val = int(clean_text)
+                        if val > 500:
+                            price = val
+                            break
                         
         return title, price, []
     except: return None, None, []
@@ -332,6 +353,7 @@ def manual_price_check(message):
                  
     bot.reply_to(message, "✅ Manual check poora ho gaya, report de di maine!")
 
+# BUG 9 FIX: ONE MESSAGE PER ITEM LIST (No more button raita)
 @bot.message_handler(commands=['list'])
 def show_list(message):
     chat_id = str(message.chat.id)
@@ -341,11 +363,10 @@ def show_list(message):
         bot.reply_to(message, "📭 Teri Wishlist khali hai! Koi link bhej.")
         return
     
-    response = "📋 **Teri Wishlist & Tracking List:**\n\n"
-    markup = InlineKeyboardMarkup() 
+    bot.reply_to(message, f"📋 **Teri Wishlist & Tracking List:** ({len(data[chat_id])} items)\nNeeche har item ke buttons check kar 👇", parse_mode='Markdown')
     
     for index, item in enumerate(data[chat_id]):
-        short_title = item['title'][:35] + "..." if len(item['title']) > 35 else item['title']
+        short_title = item['title'][:50] + "..." if len(item['title']) > 50 else item['title']
         platform_icon = "🛒" if item.get('platform') == "Flipkart" else "📦"
         
         if 'price_history' in item and len(item['price_history']) > 0:
@@ -353,14 +374,15 @@ def show_list(message):
         else:
             current_price = item['start_price']
             
-        response += f"*{index + 1}.* {platform_icon} {short_title}\n💰 Current: ₹{current_price}\n\n"
+        res = f"{platform_icon} *{short_title}*\n💰 Current: ₹{current_price}"
         
+        markup = InlineKeyboardMarkup()
         markup.row(
-            InlineKeyboardButton(f"📈 Graph {index + 1}", callback_data=f"hist_{index}"),
-            InlineKeyboardButton(f"🗑️ Delete {index + 1}", callback_data=f"del_{index}")
+            InlineKeyboardButton(f"📈 Graph", callback_data=f"hist_{index}"),
+            InlineKeyboardButton(f"🗑️ Delete", callback_data=f"del_{index}")
         )
-    
-    bot.reply_to(message, response, parse_mode='Markdown', reply_markup=markup)
+        
+        bot.send_message(chat_id, res, parse_mode='Markdown', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
@@ -390,6 +412,7 @@ def handle_query(call):
             deleted_item = data[chat_id].pop(item_number)
             save_data(data)
             bot.answer_callback_query(call.id, "🗑️ Item deleted!")
+            bot.delete_message(chat_id, call.message.message_id) # Delete card from chat to keep clean
             bot.send_message(chat_id, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
             
     except Exception as e:
@@ -430,7 +453,8 @@ def handle_message(message):
             "start_price": current_price,
             "platform": platform,
             "price_history": [{"date": current_time_str, "price": current_price}],
-            "latest_offers": offers
+            "latest_offers": offers,
+            "error_count": 0 # BUG 13 FIX INIT
         })
         save_data(data)
         
@@ -440,7 +464,7 @@ def handle_message(message):
     else:
         bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link me error ho sakta hai ya API ki limit khatam ho gayi ho.")
 
-# === SCHEDULED ROUTINE CHECKER (WITH 30-DAY AUTO DELETE) ===
+# === SCHEDULED ROUTINE CHECKER (WITH 30-DAY AUTO DELETE & BUG 13 ADMIN ALERTS) ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -496,6 +520,22 @@ def auto_price_checker():
                             if new_price == "OOS":
                                 continue
                                 
+                            # BUG 13 FIX: Smart Error Handling & Alerts
+                            if new_price is None:
+                                item['error_count'] = item.get('error_count', 0) + 1
+                                if item['error_count'] == 3:
+                                    try: bot.send_message(chat_id, f"⚠️ *Maintenance Alert:*\nTere product '{item['title'][:30]}...' ka link theek se check nahi ho pa raha. Humari team isko dekh rahi hai.", parse_mode="Markdown")
+                                    except: pass
+                                    
+                                    if ADMIN_CHAT_ID:
+                                        try: bot.send_message(ADMIN_CHAT_ID, f"🚨 *ADMIN ALERT: API FAILED 3 TIMES*\nLink: {item['url']}\nUser: {chat_id}", parse_mode="Markdown")
+                                        except: pass
+                                changes_made = True
+                                continue
+                            
+                            # Success pe error_count 0
+                            item['error_count'] = 0
+                                
                             if new_price:
                                 if 'price_history' not in item:
                                     item['price_history'] = [{"date": "Old Data", "price": item['start_price']}]
@@ -533,5 +573,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Double Hybrid + Admin Panel + OOS Fix Edition!")
+    print("🚀 Harsh's Bot Online: Double Hybrid + Admin Panel + OOS Fix Edition (13 Bugs Fixed)!")
     bot.infinity_polling()
