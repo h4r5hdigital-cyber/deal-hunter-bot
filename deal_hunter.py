@@ -122,7 +122,7 @@ def save_data(data):
 def get_ist_time():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
-# === HEADERS ===
+# === HEADERS & API KEY ===
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8,hi;q=0.7",
@@ -137,7 +137,7 @@ def check_amazon_price(url):
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # Bug 12: og:title for better exact name
+        # og:title for better exact name (Bug 12 Fix)
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
             title = og_title["content"].strip()
@@ -167,7 +167,7 @@ def check_amazon_price(url):
         
     print("Amazon Direct Blocked! Using API Bypass with render=true...")
     try:
-        # Bug 10 & 11 Fix: render=true added for Javascript & Variants
+        # render=true added for Javascript & Variants (Bug 10 & 11 Fix)
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
         
@@ -206,7 +206,7 @@ def check_flipkart_price(url):
         response = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # Bug 6 & 12 Fix: og:title will always extract correct variant name even if class changes
+        # og:title will always extract correct variant name even if class changes (Bug 6 & 12 Fix)
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
             title = og_title["content"].strip()
@@ -228,7 +228,7 @@ def check_flipkart_price(url):
                     clean_text = re.sub(r'[^\d]', '', text)
                     if clean_text: 
                         val = int(clean_text)
-                        # Bug 3 & 4 Fix: Ignore EMI and cheap accessories < 500 Rs
+                        # Ignore EMI and cheap accessories < 500 Rs (Bug 3 & 4 Fix)
                         if val > 500:
                             price = val
                             break
@@ -353,7 +353,7 @@ def manual_price_check(message):
                  
     bot.reply_to(message, "✅ Manual check poora ho gaya, report de di maine!")
 
-# BUG 9 FIX: ONE MESSAGE PER ITEM LIST (No more button raita)
+# ONE MESSAGE PER ITEM LIST (No more button raita) (Bug 9 Fix)
 @bot.message_handler(commands=['list'])
 def show_list(message):
     chat_id = str(message.chat.id)
@@ -412,7 +412,7 @@ def handle_query(call):
             deleted_item = data[chat_id].pop(item_number)
             save_data(data)
             bot.answer_callback_query(call.id, "🗑️ Item deleted!")
-            bot.delete_message(chat_id, call.message.message_id) # Delete card from chat to keep clean
+            bot.delete_message(chat_id, call.message.message_id) 
             bot.send_message(chat_id, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
             
     except Exception as e:
@@ -423,17 +423,30 @@ def handle_message(message):
     url = message.text.strip()
     
     if "amazon" in url.lower() or "amzn" in url.lower():
-        bot.reply_to(message, "🔍 Amazon par data check kar raha hoon...")
-        title, current_price, offers = check_amazon_price(url)
         platform = "Amazon"
     elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
-        bot.reply_to(message, "🔍 Flipkart par check kar raha hoon...")
-        title, current_price, offers = check_flipkart_price(url)
         platform = "Flipkart"
     else:
         bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon aur Flipkart ke links bhej.")
         return
-        
+
+    bot.reply_to(message, f"🔍 {platform} par data check kar raha hoon... (Heavy page loading, thoda wait kar)")
+    
+    # 🔄 SILENT AUTO-RETRY LOGIC 
+    current_price = None
+    offers = []
+    title = ""
+    for attempt in range(2): 
+        if platform == "Amazon":
+            title, current_price, offers = check_amazon_price(url)
+        else:
+            title, current_price, offers = check_flipkart_price(url)
+            
+        if current_price: 
+            break 
+        else:
+            time.sleep(3) 
+
     # OOS CHECK
     if current_price == "OOS":
         bot.reply_to(message, "❌ **Bhai, tera bheja hua variant/color abhi OUT OF STOCK hai!**\nMain galat in-stock variant ka price nahi uthaunga, isliye maine isko list mein add nahi kiya.")
@@ -454,7 +467,7 @@ def handle_message(message):
             "platform": platform,
             "price_history": [{"date": current_time_str, "price": current_price}],
             "latest_offers": offers,
-            "error_count": 0 # BUG 13 FIX INIT
+            "error_count": 0 
         })
         save_data(data)
         
@@ -462,9 +475,10 @@ def handle_message(message):
         response = f"✅ **{platform.upper()} TRACKING ON**\n{icon} {title[:50]}...\n💰 Price: ₹{current_price}\n\n"
         bot.reply_to(message, response, parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ Bhai, data nahi mil raha. Link me error ho sakta hai ya API ki limit khatam ho gayi ho.")
+        # 🛡️ POLITE ERROR 
+        bot.reply_to(message, "⚠️ Bhai lagta hai server thoda busy hai ya timeout ho gaya. Ek baar fir se link bhej de!")
 
-# === SCHEDULED ROUTINE CHECKER (WITH 30-DAY AUTO DELETE & BUG 13 ADMIN ALERTS) ===
+# === SCHEDULED ROUTINE CHECKER ===
 def auto_price_checker():
     checked_keys = set()
     while True:
@@ -520,7 +534,7 @@ def auto_price_checker():
                             if new_price == "OOS":
                                 continue
                                 
-                            # BUG 13 FIX: Smart Error Handling & Alerts
+                            # Smart Error Handling & Alerts (Bug 13 Fix)
                             if new_price is None:
                                 item['error_count'] = item.get('error_count', 0) + 1
                                 if item['error_count'] == 3:
@@ -573,5 +587,5 @@ def auto_price_checker():
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: Double Hybrid + Admin Panel + OOS Fix Edition (13 Bugs Fixed)!")
+    print("🚀 Harsh's Bot Online: Double Hybrid + Admin Panel + OOS Fix Edition (All 13 Bugs Fixed)!")
     bot.infinity_polling()
