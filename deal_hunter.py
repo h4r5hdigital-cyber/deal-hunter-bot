@@ -169,9 +169,11 @@ def extract_smart_price(text):
         return p
     return None
 
+# ✅ AMAZON FIX 1: URL Mutilation Fixed
 def resolve_url(url):
     try:
-        if "dl.flipkart" in url or "amzn.to" in url or "flipkart.com/s/" in url:
+        # Added amzn.in for new Amazon shortlinks
+        if "dl.flipkart" in url or "amzn.to" in url or "amzn.in" in url or "flipkart.com/s/" in url:
             res = requests.head(url, allow_redirects=True, timeout=7)
             url = res.url
             
@@ -183,6 +185,9 @@ def resolve_url(url):
                 return f"https://www.flipkart.com{parsed.path}?pid={pid[0]}"
             return f"https://www.flipkart.com{parsed.path}"
         elif "amazon" in url.lower() or "amzn" in url.lower():
+            # Query parameters (?th=1) will not be deleted now
+            if parsed.query:
+                return f"https://www.amazon.in{parsed.path}?{parsed.query}"
             return f"https://www.amazon.in{parsed.path}"
         return url
     except:
@@ -200,7 +205,8 @@ API_KEY = "b96371ea776a13335d3c6fd192254409"
 def check_amazon_price(url):
     title, price, offers, img_url = "Amazon Product", None, [], "https://i.imgur.com/3Q9c4gN.png"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        # ✅ AMAZON FIX 2: Increased timeout to 15 seconds
+        response = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.content, "html.parser")
         
         og_title = soup.find("meta", property="og:title")
@@ -398,7 +404,6 @@ def reset_data(message):
 
 @bot.message_handler(commands=['checknow'])
 def show_checknow_handler(message):
-    # FIX: Threading applied so bot doesn't hang
     threading.Thread(target=manual_price_check, args=(message.chat.id,), daemon=True).start()
 
 @bot.message_handler(commands=['list'])
@@ -460,7 +465,6 @@ def handle_query(call):
         handle_pagination(chat_id, int(call.data.split("_")[1]), call=call)
         return
     elif call.data == "checkall":
-        # FIX: Threading applied here too
         threading.Thread(target=manual_price_check, args=(chat_id,), daemon=True).start()
         return
     elif call.data == "clearall":
@@ -524,7 +528,6 @@ def handle_query(call):
             
             fresh_data = load_data()
             if p == "OOS":
-                # OOS Smart Tracker for Manual Refresh
                 if chat_id in fresh_data:
                     for i, f_item in enumerate(fresh_data[chat_id]):
                         if f_item['id'] == item_id:
@@ -543,7 +546,6 @@ def handle_query(call):
                                 f_item['price_history'].append({"date": get_current_time_str(), "price": p})
                             f_item['latest_offers'] = o
                             
-                            # Item back in stock check
                             if f_item.get('is_oos'):
                                 f_item['is_oos'] = False
                                 try: bot.send_message(chat_id, f"🎉 **BACK IN STOCK!**\n📦 {f_item['title'][:40]}... ab wapas available hai!")
@@ -674,7 +676,7 @@ def manual_price_check(chat_id_raw):
                              fresh_data[chat_id_str][i]['is_oos'] = True
                              save_data(fresh_data)
                              bot.send_message(chat_id_str, f"🚫 **OUT OF STOCK ALERT**\n{item['title'][:30]}...")
-                             time.sleep(1.5) # FIX: Anti-Spam delay
+                             time.sleep(1.5) 
                          break
              continue
              
@@ -691,13 +693,11 @@ def manual_price_check(chat_id_raw):
             if chat_id_str in fresh_data:
                 for i, f_item in enumerate(fresh_data[chat_id_str]):
                     if f_item['id'] == item_id:
-                        # Check if back in stock
                         if f_item.get('is_oos'):
                             fresh_data[chat_id_str][i]['is_oos'] = False
                             bot.send_message(chat_id_str, f"🎉 **BACK IN STOCK!**\n📦 {item['title'][:40]}... ab wapas stock mein hai!")
                             time.sleep(1.5)
                         
-                        # Check for price change
                         if new_price != last_recorded_price:
                             fresh_data[chat_id_str][i]['price_history'].append({"date": get_current_time_str(), "price": new_price})
                             if platform == "Flipkart" and offers: 
@@ -707,7 +707,7 @@ def manual_price_check(chat_id_raw):
                             alert_card = f"🚨 **DEAL ALERT! Price Changed**\n{build_card_ui(item)}"
                             try: bot.send_photo(chat_id_str, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
                             except: bot.send_message(chat_id_str, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
-                            time.sleep(1.5) # FIX: Anti-Spam delay
+                            time.sleep(1.5) 
                             
                         save_data(fresh_data)
                         break
@@ -723,7 +723,6 @@ def auto_price_checker():
             check_key = f"{ist_now.strftime('%Y-%m-%d')}-{ist_now.hour}"
             if check_key not in checked_keys:
                 
-                # Step 1: Process Tracking Expiry
                 fresh_data = load_data()
                 changes_made = False
                 for chat_id in list(fresh_data.keys()):
@@ -747,7 +746,6 @@ def auto_price_checker():
                     fresh_data[chat_id] = valid_items 
                 if changes_made: save_data(fresh_data)
                 
-                # Step 2: Loop Scrape with Safe Sync
                 data_snapshot = load_data()
                 for chat_id, items in data_snapshot.items():
                     for item_snap in items:
@@ -796,7 +794,6 @@ def auto_price_checker():
                                         if ci['id'] == item_id:
                                             c_data[chat_id][i]['error_count'] = 0
                                             
-                                            # Back in stock
                                             if c_data[chat_id][i].get('is_oos'):
                                                 c_data[chat_id][i]['is_oos'] = False
                                                 try:
