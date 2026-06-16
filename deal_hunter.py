@@ -773,4 +773,62 @@ def auto_price_checker():
                                             if not ci.get('is_oos'):
                                                 c_data[chat_id][i]['is_oos'] = True
                                                 save_data(c_data)
-                                                try
+                                                try:
+                                                    bot.send_message(chat_id, f"🚫 **OUT OF STOCK ALERT**\nBhai tera ye item out of stock ho gaya hai:\n📦 {ci['title'][:40]}...")
+                                                    time.sleep(1.5)
+                                                except: pass
+                                            break
+                                continue
+                                
+                            if new_price is None:
+                                c_data = load_data()
+                                if chat_id in c_data:
+                                    for i, ci in enumerate(c_data[chat_id]):
+                                        if ci['id'] == item_id:
+                                            c_data[chat_id][i]['error_count'] = c_data[chat_id][i].get('error_count', 0) + 1
+                                            if c_data[chat_id][i]['error_count'] == 3:
+                                                try: bot.send_message(chat_id, f"⚠️ *Maintenance Alert:*\nTere product '{ci['title'][:30]}...' ka link check nahi ho pa raha.", parse_mode="Markdown")
+                                                except: pass
+                                                time.sleep(1.5)
+                                            save_data(c_data)
+                                            break
+                                continue
+                                
+                            if new_price:
+                                last_recorded_price = item_snap['price_history'][-1]['price'] if 'price_history' in item_snap and item_snap['price_history'] else item_snap.get('start_price', 0)
+                                
+                                c_data = load_data()
+                                if chat_id in c_data:
+                                    for i, ci in enumerate(c_data[chat_id]):
+                                        if ci['id'] == item_id:
+                                            c_data[chat_id][i]['error_count'] = 0
+                                            
+                                            if c_data[chat_id][i].get('is_oos'):
+                                                c_data[chat_id][i]['is_oos'] = False
+                                                try:
+                                                    bot.send_message(chat_id, f"🎉 **BACK IN STOCK!**\n📦 {ci['title'][:40]}... wapas stock mein aa gaya!")
+                                                    time.sleep(1.5)
+                                                except: pass
+                                                
+                                            if new_price != last_recorded_price:
+                                                c_data[chat_id][i]['price_history'].append({"date": get_current_time_str(), "price": new_price})
+                                                if platform == "Flipkart" and offers: c_data[chat_id][i]['latest_offers'] = offers
+                                                
+                                                alert_card = f"🚨 **AUTO-DROP DETECTED!**\n{build_card_ui(c_data[chat_id][i])}"
+                                                try: bot.send_photo(chat_id, ci.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, ci['url'], platform))
+                                                except: bot.send_message(chat_id, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, ci['url'], platform))
+                                                time.sleep(1.5)
+                                                
+                                            save_data(c_data)
+                                            break
+                        except Exception as e: pass
+                            
+                checked_keys.add(check_key)
+        time.sleep(60) 
+
+# === START ENGINE ===
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=auto_price_checker, daemon=True).start()
+    print("🚀 Harsh's Bot Online: FULL V2.4 FINAL EDITION!")
+    bot.infinity_polling()
