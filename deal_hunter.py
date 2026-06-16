@@ -10,6 +10,7 @@ from flask import Flask, redirect, url_for, request
 from datetime import datetime, timedelta
 import urllib.parse
 import re
+import uuid  # Naya import (Unique ID ke liye)
 
 # === TOKENS & SETUP ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN") 
@@ -37,7 +38,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Harsh's Admin Dashboard V2</title>
+        <title>Harsh's Admin Dashboard V2.0</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 30px; }
@@ -69,8 +70,9 @@ def home():
     """
     has_items = False
     for chat_id, items in data.items():
-        for index, item in enumerate(items):
+        for item in items:
             has_items = True
+            item_id = item.get('id', '')
             title = item.get('title', 'Product')
             platform = item.get('platform', 'Unknown')
             css_class = "flipkart" if platform == 'Flipkart' else "amazon"
@@ -95,7 +97,7 @@ def home():
                 <div class="offers">{offers_text}</div>
                 <div class="action-buttons">
                     <a href="{url}" target="_blank" class="btn" style="flex: 1;">View Deal</a>
-                    <form action="/delete/{chat_id}/{index}" method="POST" style="flex: 1; margin: 0; display: flex;">
+                    <form action="/delete/{chat_id}/{item_id}" method="POST" style="flex: 1; margin: 0; display: flex;">
                         <button type="submit" class="btn btn-danger" style="width: 100%;">🗑️ Delete</button>
                     </form>
                 </div>
@@ -106,15 +108,19 @@ def home():
     html += "</div></body></html>"
     return html
 
-@app.route('/delete/<chat_id>/<int:item_index>', methods=['POST'])
-def admin_delete(chat_id, item_index):
+@app.route('/delete/<chat_id>/<item_id>', methods=['POST'])
+def admin_delete(chat_id, item_id):
     data = load_data()
-    if chat_id in data and 0 <= item_index < len(data[chat_id]):
-        deleted_item = data[chat_id].pop(item_index)
-        save_data(data)
-        try:
-            bot.send_message(chat_id, f"⚠️ **Admin Action:** Tera item '{deleted_item['title'][:30]}...' list se hata diya gaya hai.")
-        except: pass
+    if chat_id in data:
+        # Index shift bug fixed: Item delete by unique ID
+        for i, item in enumerate(data[chat_id]):
+            if item.get('id') == item_id:
+                deleted_item = data[chat_id].pop(i)
+                save_data(data)
+                try:
+                    bot.send_message(chat_id, f"⚠️ **Admin Action:** Tera item '{deleted_item['title'][:30]}...' list se hata diya gaya hai.")
+                except: pass
+                break
     return redirect(url_for('home'))
 
 def run_flask():
@@ -124,7 +130,17 @@ def run_flask():
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
-            try: return json.load(f)
+            try: 
+                data = json.load(f)
+                # Migration: Add ID to old items
+                modified = False
+                for cid in data:
+                    for itm in data[cid]:
+                        if 'id' not in itm:
+                            itm['id'] = str(uuid.uuid4())[:8]
+                            modified = True
+                if modified: save_data(data)
+                return data
             except: return {}
     return {}
 
@@ -147,6 +163,16 @@ def extract_smart_price(text):
             if len(matches) > 1: return int(matches[1])
         return p
     return None
+
+# FIX: Short links expander
+def resolve_url(url):
+    try:
+        if "dl.flipkart" in url or "amzn.to" in url:
+            res = requests.head(url, allow_redirects=True, timeout=5)
+            return res.url
+        return url
+    except:
+        return url
 
 # === HEADERS & API KEY ===
 HEADERS = {
@@ -328,11 +354,12 @@ def build_card_ui(item, expanded_offers=False):
     card += f"━━━━━━━━━━━━━━━━━━━━\n*⏱️ Last synced: {get_current_time_str()}*"
     return card
 
-def get_action_keyboard(index, url, platform):
+# FIX: Passed Item ID instead of Array Index
+def get_action_keyboard(item_id, url, platform):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🛒 View Deal", url=url), InlineKeyboardButton("🎁 Offers", callback_data=f"off_{index}"))
-    markup.row(InlineKeyboardButton("🔄 Check Price", callback_data=f"ref_{index}"), InlineKeyboardButton("📉 Graph", callback_data=f"hist_{index}"))
-    markup.row(InlineKeyboardButton("🗑️ Delete", callback_data=f"del_{index}"))
+    markup.row(InlineKeyboardButton("🛒 View Deal", url=url), InlineKeyboardButton("🎁 Offers", callback_data=f"off_{item_id}"))
+    markup.row(InlineKeyboardButton("🔄 Check Price", callback_data=f"ref_{item_id}"), InlineKeyboardButton("📉 Graph", callback_data=f"hist_{item_id}"))
+    markup.row(InlineKeyboardButton("🗑️ Delete", callback_data=f"del_{item_id}"))
     return markup
 
 # === BOT COMMANDS ===
@@ -361,7 +388,7 @@ def show_checknow_handler(message):
 def show_list(message):
     handle_pagination(message.chat.id, 0)
 
-# === PAGINATION SYSTEM (FIXED BUG 2) ===
+# === PAGINATION SYSTEM ===
 def handle_pagination(chat_id_raw, page):
     chat_id = str(chat_id_raw)
     data = load_data()
@@ -382,10 +409,9 @@ def handle_pagination(chat_id_raw, page):
     
     bot.send_message(chat_id, f"📋 **Teri Wishlist & Tracking List (Page {page+1}/{total_pages})**", parse_mode="Markdown")
     
-    for i, item in enumerate(page_items):
-        actual_idx = start_idx + i
+    for item in page_items:
         card_text = build_card_ui(item)
-        markup = get_action_keyboard(actual_idx, item['url'], item['platform'])
+        markup = get_action_keyboard(item['id'], item['url'], item['platform'])
         try: bot.send_photo(chat_id, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=card_text, parse_mode="Markdown", reply_markup=markup)
         except: bot.send_message(chat_id, card_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -394,11 +420,11 @@ def handle_pagination(chat_id_raw, page):
     if page > 0: row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{page-1}"))
     if page < total_pages - 1: row.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{page+1}"))
     
-    if row: # FIX 2: Correct navigation condition check
+    if row: 
         nav_markup.row(*row)
         bot.send_message(chat_id, "Navigation:", reply_markup=nav_markup)
 
-# === CALLBACK HANDLER (FIXED BUG 3) ===
+# === CALLBACK HANDLER ===
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     bot.answer_callback_query(call.id)
@@ -418,14 +444,22 @@ def handle_query(call):
         return
         
     try:
-        action, idx_str = call.data.split('_')
-        item_number = int(idx_str)
+        action, item_id = call.data.split('_')
         
-        if chat_id not in data or item_number >= len(data[chat_id]):
+        # FIX: Find item by Unique ID instead of Index
+        item = None
+        item_index = -1
+        if chat_id in data:
+            for i, itm in enumerate(data[chat_id]):
+                if itm.get('id') == item_id:
+                    item = itm
+                    item_index = i
+                    break
+                    
+        if not item:
             bot.send_message(chat_id, "❌ Ye item ab list mein nahi hai.")
             return
             
-        item = data[chat_id][item_number]
         platform = item.get('platform', 'Unknown')
         
         if action == "hist":
@@ -440,7 +474,7 @@ def handle_query(call):
             if platform == "Amazon": bot.send_message(chat_id, "🚧 Amazon Offers feature is Coming Soon!")
             else:
                 new_card = build_card_ui(item, expanded_offers=True)
-                try: bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], item['platform']))
+                try: bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_id, item['url'], item['platform']))
                 except: pass
                 
         elif action == "ref":
@@ -458,9 +492,8 @@ def handle_query(call):
                 save_data(data)
                 new_card = build_card_ui(item)
                 
-                # FIX 3: Exception handling for "Message is not modified"
                 try:
-                    bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], platform))
+                    bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_id, item['url'], platform))
                     bot.send_message(chat_id, f"✅ **Update Success!**")
                 except Exception as e:
                     bot.send_message(chat_id, f"✅ Daam abhi bhi **₹{p}** hi hai, koi naya badlaav nahi!")
@@ -468,7 +501,7 @@ def handle_query(call):
                 bot.send_message(chat_id, "⚠️ API Timeout ho gaya ya item OOS hai. Thodi der baad try kar!")
                 
         elif action == "del":
-            deleted_item = data[chat_id].pop(item_number)
+            deleted_item = data[chat_id].pop(item_index)
             save_data(data)
             try: bot.delete_message(chat_id, call.message.message_id) 
             except: pass
@@ -481,6 +514,11 @@ def handle_message(message):
     url = message.text.strip()
     chat_id = str(message.chat.id)
     
+    # FIX: Fake URL validation check
+    if not (url.startswith("http://") or url.startswith("https://")):
+        bot.reply_to(message, "⚠️ Bhai, proper website ka link bhej (http/https hona zaroori hai).")
+        return
+    
     if "amazon" in url.lower() or "amzn" in url.lower(): platform = "Amazon"
     elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower(): platform = "Flipkart"
     else:
@@ -489,6 +527,18 @@ def handle_message(message):
 
     try: bot.delete_message(message.chat.id, message.message_id)
     except: pass
+
+    # FIX: URL Expander for short links
+    url = resolve_url(url)
+    
+    # FIX: Duplicate Link Check
+    data = load_data()
+    clean_url = url.split('?')[0] # Remove tracking parameters for comparison
+    if chat_id in data:
+        for item in data[chat_id]:
+            if clean_url in item['url']:
+                bot.send_message(chat_id, "⚠️ **Arey bhai!** Ye product teri wishlist mein pehle se hi hai.")
+                return
 
     ghost = bot.send_message(message.chat.id, f"🔍 {platform} par data check kar raha hoon... (Heavy page loading, thoda wait kar)")
     
@@ -507,9 +557,11 @@ def handle_message(message):
         return
 
     if current_price:
-        data = load_data()
         if chat_id not in data: data[chat_id] = []
+        new_id = str(uuid.uuid4())[:8] # Nayi ID generate
+        
         new_item = {
+            "id": new_id,  # FIX: Unique ID Assign
             "url": url, "title": title, "start_price": current_price, "platform": platform,
             "price_history": [{"date": get_current_time_str(), "price": current_price}],
             "latest_offers": offers, "image_url": img_url, "error_count": 0 
@@ -517,17 +569,16 @@ def handle_message(message):
         data[chat_id].append(new_item)
         save_data(data)
         
-        item_idx = len(data[chat_id]) - 1
         card_text = f"✅ **TRACKING ACTIVATED**\n{build_card_ui(new_item)}"
-        markup = get_action_keyboard(item_idx, url, platform)
+        markup = get_action_keyboard(new_id, url, platform) # Pass unique ID
         
         try: bot.send_photo(chat_id, img_url, caption=card_text, parse_mode="Markdown", reply_markup=markup)
         except: bot.send_message(chat_id, card_text, parse_mode="Markdown", reply_markup=markup)
     else: bot.send_message(chat_id, "⚠️ Bhai lagta hai server thoda busy hai ya timeout ho gaya. Ek baar fir se link bhej de!")
 
-# === CHECK ALL (FIXED BUG 1) ===
+# === CHECK ALL ===
 def manual_price_check(chat_id_raw):
-    chat_id_str = str(chat_id_raw) # FIX 1: Type mismatch error fix
+    chat_id_str = str(chat_id_raw) 
     bot.send_message(chat_id_str, "⚙️ Backend check shuru kar diya! Prices scrape kar raha hoon, thoda wait kar...")
     data = load_data()
     
@@ -535,8 +586,10 @@ def manual_price_check(chat_id_raw):
         bot.send_message(chat_id_str, "❌ Teri list khali hai. Pehle koi Flipkart ya Amazon ka link toh bhej!")
         return
         
-    for i, item in enumerate(data[chat_id_str]):
+    for item in data[chat_id_str]:
         platform = item.get('platform', 'Amazon')
+        item_id = item.get('id', '')
+        
         if platform == "Amazon": title, new_price, offers, img = check_amazon_price(item['url'])
         elif platform == "Flipkart": title, new_price, offers, img = check_flipkart_price(item['url'])
             
@@ -545,7 +598,7 @@ def manual_price_check(chat_id_raw):
              continue
              
         if not new_price:
-            markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔄 Manual Retry", callback_data=f"ref_{i}"))
+            markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔄 Manual Retry", callback_data=f"ref_{item_id}"))
             bot.send_message(chat_id_str, f"⚠️ API Timeout: {item['title'][:30]}...", reply_markup=markup)
             continue
              
@@ -557,8 +610,8 @@ def manual_price_check(chat_id_raw):
                 item['price_history'].append({"date": get_current_time_str(), "price": new_price})
                 save_data(data)
                 alert_card = f"🚨 **DEAL ALERT! Price Changed**\n{build_card_ui(item)}"
-                try: bot.send_photo(chat_id_str, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
-                except: bot.send_message(chat_id_str, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
+                try: bot.send_photo(chat_id_str, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
+                except: bot.send_message(chat_id_str, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
     
     bot.send_message(chat_id_str, "✅ Manual check poora ho gaya, report de di maine!")
 
@@ -592,8 +645,9 @@ def auto_price_checker():
                     data[chat_id] = valid_items 
                 
                 for chat_id, items in data.items():
-                    for i, item in enumerate(items):
+                    for item in items:
                         try:
+                            item_id = item.get('id', '')
                             platform = item.get('platform', 'Amazon')
                             if platform == "Amazon": title, new_price, offers, img = check_amazon_price(item['url'])
                             elif platform == "Flipkart": title, new_price, offers, img = check_flipkart_price(item['url'])
@@ -623,8 +677,8 @@ def auto_price_checker():
                                     item['price_history'].append({"date": get_current_time_str(), "price": new_price})
                                     changes_made = True
                                     alert_card = f"🚨 **AUTO-DROP DETECTED!**\n{build_card_ui(item)}"
-                                    try: bot.send_photo(chat_id, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
-                                    except: bot.send_message(chat_id, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
+                                    try: bot.send_photo(chat_id, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
+                                    except: bot.send_message(chat_id, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, item['url'], platform))
                         except Exception as e: pass
                             
                 if changes_made: save_data(data)
