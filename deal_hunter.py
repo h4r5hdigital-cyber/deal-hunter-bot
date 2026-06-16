@@ -169,11 +169,9 @@ def extract_smart_price(text):
         return p
     return None
 
-# ✅ AMAZON FIX 1: URL Mutilation Fixed
 def resolve_url(url):
     try:
-        # Added amzn.in for new Amazon shortlinks
-        if "dl.flipkart" in url or "amzn.to" in url or "amzn.in" in url or "flipkart.com/s/" in url:
+        if "dl.flipkart" in url or "amzn.to" in url or "flipkart.com/s/" in url:
             res = requests.head(url, allow_redirects=True, timeout=7)
             url = res.url
             
@@ -185,9 +183,6 @@ def resolve_url(url):
                 return f"https://www.flipkart.com{parsed.path}?pid={pid[0]}"
             return f"https://www.flipkart.com{parsed.path}"
         elif "amazon" in url.lower() or "amzn" in url.lower():
-            # Query parameters (?th=1) will not be deleted now
-            if parsed.query:
-                return f"https://www.amazon.in{parsed.path}?{parsed.query}"
             return f"https://www.amazon.in{parsed.path}"
         return url
     except:
@@ -201,55 +196,68 @@ HEADERS = {
 }
 API_KEY = "b96371ea776a13335d3c6fd192254409" 
 
-# === AMAZON HYBRID SCRAPER ===
+# === AMAZON HYBRID SCRAPER (SUPERCHARGED) ===
 def check_amazon_price(url):
     title, price, offers, img_url = "Amazon Product", None, [], "https://i.imgur.com/3Q9c4gN.png"
+    
+    def extract_amz_data(soup_obj):
+        t, p, img = "Amazon Product", None, "https://i.imgur.com/3Q9c4gN.png"
+        t_el = soup_obj.find("span", id="productTitle")
+        if t_el: t = t_el.text.strip()
+            
+        img_el = soup_obj.find("img", id="landingImage")
+        if img_el and img_el.get("src"): img = img_el.get("src")
+            
+        avail = soup_obj.find("div", id="availability")
+        if avail and re.search(r'currently unavailable|out of stock', avail.text, re.I):
+            return t, "OOS", img
+            
+        price_selectors = [
+            soup_obj.find("span", class_="a-price-whole"),
+            soup_obj.find("span", class_="a-offscreen"),
+            soup_obj.find("span", id="priceblock_ourprice"),
+            soup_obj.find("span", id="priceblock_dealprice"),
+            soup_obj.find("span", class_="a-size-medium a-color-price"),
+            soup_obj.find("div", id="corePriceDisplay_desktop_feature_div")
+        ]
+        
+        for selector in price_selectors:
+            if selector and selector.text.strip():
+                val = extract_smart_price(selector.text)
+                if val and val > 0:
+                    p = val
+                    break
+                    
+        return t, p, img
+
     try:
-        # ✅ AMAZON FIX 2: Increased timeout to 15 seconds
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        amz_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        }
+        response = requests.get(url, headers=amz_headers, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
         
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"): title = og_title["content"].strip()
+        if "captcha" in soup.text.lower() and "type the characters" in soup.text.lower():
+            price = None 
         else:
-            t_el = soup.find("span", id="productTitle")
-            if t_el: title = t_el.text.strip()
-
-        og_img = soup.find("meta", property="og:image")
-        if og_img and og_img.get("content"): img_url = og_img.get("content")
-        
-        availability = soup.find("div", id="availability")
-        if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
-            return title, "OOS", [], img_url
-            
-        p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price") or soup.find("span", class_="a-button-text")
-        if p_el: price = extract_smart_price(p_el.text)
+            title, price, img_url = extract_amz_data(soup)
     except: pass
 
-    if price: return title, price, offers, img_url
+    if price and price != "OOS": return title, price, offers, img_url
         
     try:
-        response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
+        params = {'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}
+        response = requests.get('http://api.scraperapi.com', params=params, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
-        
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"): title = og_title["content"].strip()
-        else:
-            t_el = soup.find("span", id="productTitle")
-            if t_el: title = t_el.text.strip()
-            
-        og_img = soup.find("meta", property="og:image")
-        if og_img and og_img.get("content"): img_url = og_img.get("content")
-        
-        availability = soup.find("div", id="availability")
-        if availability and re.search(r'currently unavailable|out of stock', availability.text, re.I):
-            return title, "OOS", [], img_url
-            
-        p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price")
-        if p_el: price = extract_smart_price(p_el.text)
-                
-        return title, price, [], img_url
-    except: return None, None, [], img_url
+        title, price, img_url = extract_amz_data(soup)
+    except: pass
+
+    return title, price, offers, img_url
 
 # === FLIPKART DOUBLE HYBRID SCRAPER ===
 def check_flipkart_price(url):
@@ -499,6 +507,7 @@ def handle_query(call):
             res = f"📉 **PRICE HISTORY REPORT**\n📦 {item['title'][:50]}...\n----------------------------------------\n"
             res += f"🔥 **Lowest:** ₹{min(prices)} | 📈 **Highest:** ₹{max(prices)}\n"
             bot.send_photo(chat_id, chart_url, caption=res, parse_mode='Markdown')
+            time.sleep(1.5)
             
         elif action == "off":
             if platform == "Amazon": bot.send_message(chat_id, "🚧 Amazon Offers feature is Coming Soon!")
@@ -764,62 +773,4 @@ def auto_price_checker():
                                             if not ci.get('is_oos'):
                                                 c_data[chat_id][i]['is_oos'] = True
                                                 save_data(c_data)
-                                                try:
-                                                    bot.send_message(chat_id, f"🚫 **OUT OF STOCK ALERT**\nBhai tera ye item out of stock ho gaya hai:\n📦 {ci['title'][:40]}...")
-                                                    time.sleep(1.5)
-                                                except: pass
-                                            break
-                                continue
-                                
-                            if new_price is None:
-                                c_data = load_data()
-                                if chat_id in c_data:
-                                    for i, ci in enumerate(c_data[chat_id]):
-                                        if ci['id'] == item_id:
-                                            c_data[chat_id][i]['error_count'] = c_data[chat_id][i].get('error_count', 0) + 1
-                                            if c_data[chat_id][i]['error_count'] == 3:
-                                                try: bot.send_message(chat_id, f"⚠️ *Maintenance Alert:*\nTere product '{ci['title'][:30]}...' ka link check nahi ho pa raha.", parse_mode="Markdown")
-                                                except: pass
-                                                time.sleep(1.5)
-                                            save_data(c_data)
-                                            break
-                                continue
-                                
-                            if new_price:
-                                last_recorded_price = item_snap['price_history'][-1]['price'] if 'price_history' in item_snap and item_snap['price_history'] else item_snap.get('start_price', 0)
-                                
-                                c_data = load_data()
-                                if chat_id in c_data:
-                                    for i, ci in enumerate(c_data[chat_id]):
-                                        if ci['id'] == item_id:
-                                            c_data[chat_id][i]['error_count'] = 0
-                                            
-                                            if c_data[chat_id][i].get('is_oos'):
-                                                c_data[chat_id][i]['is_oos'] = False
-                                                try:
-                                                    bot.send_message(chat_id, f"🎉 **BACK IN STOCK!**\n📦 {ci['title'][:40]}... wapas stock mein aa gaya!")
-                                                    time.sleep(1.5)
-                                                except: pass
-                                                
-                                            if new_price != last_recorded_price:
-                                                c_data[chat_id][i]['price_history'].append({"date": get_current_time_str(), "price": new_price})
-                                                if platform == "Flipkart" and offers: c_data[chat_id][i]['latest_offers'] = offers
-                                                
-                                                alert_card = f"🚨 **AUTO-DROP DETECTED!**\n{build_card_ui(c_data[chat_id][i])}"
-                                                try: bot.send_photo(chat_id, ci.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, ci['url'], platform))
-                                                except: bot.send_message(chat_id, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(item_id, ci['url'], platform))
-                                                time.sleep(1.5)
-                                                
-                                            save_data(c_data)
-                                            break
-                        except Exception as e: pass
-                            
-                checked_keys.add(check_key)
-        time.sleep(60) 
-
-# === START ENGINE ===
-if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=auto_price_checker, daemon=True).start()
-    print("🚀 Harsh's Bot Online: FULL V2.4 FINAL EDITION!")
-    bot.infinity_polling()
+                                                try
