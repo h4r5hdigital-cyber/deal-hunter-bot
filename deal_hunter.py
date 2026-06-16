@@ -28,7 +28,7 @@ try:
 except Exception as e:
     print("Menu set karne mein error:", e)
 
-# === FLASK SETUP (FEATURE 15: Color Coding UI) ===
+# === FLASK SETUP ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -138,7 +138,6 @@ def get_ist_time():
 def get_current_time_str():
     return get_ist_time().strftime("%d-%b %I:%M %p")
 
-# BUG 14 FIX: Smart Extraction to prevent 999596 merging
 def extract_smart_price(text):
     text = text.replace(',', '')
     matches = re.findall(r'\d+', text)
@@ -151,8 +150,8 @@ def extract_smart_price(text):
 
 # === HEADERS & API KEY ===
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8,hi;q=0.7",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept-Language": "en-IN,en-US;q=0.9",
     "Connection": "keep-alive"
 }
 API_KEY = "b96371ea776a13335d3c6fd192254409" 
@@ -160,7 +159,6 @@ API_KEY = "b96371ea776a13335d3c6fd192254409"
 # === AMAZON HYBRID SCRAPER ===
 def check_amazon_price(url):
     title, price, offers, img_url = "Amazon Product", None, [], "https://i.imgur.com/3Q9c4gN.png"
-    
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -171,7 +169,6 @@ def check_amazon_price(url):
             t_el = soup.find("span", id="productTitle")
             if t_el: title = t_el.text.strip()
 
-        # FEATURE 10: Visual Thumbnail
         og_img = soup.find("meta", property="og:image")
         if og_img and og_img.get("content"): img_url = og_img.get("content")
         
@@ -180,14 +177,11 @@ def check_amazon_price(url):
             return title, "OOS", [], img_url
             
         p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price") or soup.find("span", class_="a-button-text")
-        if p_el: 
-            price = extract_smart_price(p_el.text)
-            
+        if p_el: price = extract_smart_price(p_el.text)
     except: pass
 
     if price: return title, price, offers, img_url
         
-    print("Amazon Direct Blocked! Using 1-Credit API Bypass...")
     try:
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -206,8 +200,7 @@ def check_amazon_price(url):
             return title, "OOS", [], img_url
             
         p_el = soup.find("span", class_="a-price-whole") or soup.find("span", class_="a-size-medium a-color-price")
-        if p_el: 
-            price = extract_smart_price(p_el.text)
+        if p_el: price = extract_smart_price(p_el.text)
                 
         return title, price, [], img_url
     except: return None, None, [], img_url
@@ -218,12 +211,9 @@ def check_flipkart_price(url):
     
     def is_flipkart_oos(soup_obj):
         page_text = soup_obj.get_text(separator=' ', strip=True).lower()
-        if "this item is currently out of stock" in page_text:
-            return True
+        if "this item is currently out of stock" in page_text: return True
         for btn in soup_obj.find_all('button'):
-            btn_txt = btn.get_text(strip=True).lower()
-            if "notify me" in btn_txt:
-                return True
+            if "notify me" in btn.get_text(strip=True).lower(): return True
         return False
 
     keywords = ["bank offer", "cashback", "special price", "partner offer", "discount"]
@@ -245,8 +235,7 @@ def check_flipkart_price(url):
         if is_flipkart_oos(soup): return title, "OOS", [], img_url
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
-        if p_el:
-            price = extract_smart_price(p_el.text)
+        if p_el: price = extract_smart_price(p_el.text)
         else:
             for tag in soup.find_all(['div', 'span']):
                 text = tag.text.strip()
@@ -268,7 +257,6 @@ def check_flipkart_price(url):
 
     if price: return title, price, offers[:5], img_url
     
-    print("Flipkart Direct Blocked! Using API Bypass with render=true...")
     try:
         response = requests.get('http://api.scraperapi.com', params={'api_key': API_KEY, 'url': url, 'country_code': 'in', 'render': 'true'}, timeout=60)
         soup = BeautifulSoup(response.content, "html.parser")
@@ -285,8 +273,7 @@ def check_flipkart_price(url):
         if is_flipkart_oos(soup): return title, "OOS", [], img_url
 
         p_el = soup.find("div", class_="_30jeq3 _16Jk6d") or soup.find("div", class_="Nx9bqj CxhGGd") or soup.find("div", class_="HLz_71")
-        if p_el:
-            price = extract_smart_price(p_el.text)
+        if p_el: price = extract_smart_price(p_el.text)
         else:
             for tag in soup.find_all(['div', 'span']):
                 text = tag.text.strip()
@@ -308,45 +295,23 @@ def check_flipkart_price(url):
         return title, price, offers[:5], img_url
     except: return None, None, [], img_url
 
-# === CHART GENERATOR ENGINE (RESTORED) ===
+# === CHART GENERATOR ENGINE ===
 def generate_chart_url(price_history, title):
     labels = [h['date'].split()[0] for h in price_history]  
     data_points = [h['price'] for h in price_history]
-    
     chart_config = {
         "type": "line",
-        "data": {
-            "labels": labels,
-            "datasets": [{
-                "label": "Price (₹)",
-                "data": data_points,
-                "borderColor": "rgb(255, 99, 132)", 
-                "backgroundColor": "rgba(255, 99, 132, 0.2)",
-                "fill": True,
-                "tension": 0.4,
-                "pointBackgroundColor": "blue",
-                "pointRadius": 5
-            }]
-        },
-        "options": {
-            "title": {"display": True, "text": title[:40] + "..."},
-            "scales": {"yAxes": [{"ticks": {"beginAtZero": False}}]}
-        }
+        "data": { "labels": labels, "datasets": [{ "label": "Price (₹)", "data": data_points, "borderColor": "rgb(255, 99, 132)", "backgroundColor": "rgba(255, 99, 132, 0.2)", "fill": True, "tension": 0.4, "pointBackgroundColor": "blue", "pointRadius": 5 }] },
+        "options": { "title": {"display": True, "text": title[:40] + "..."}, "scales": {"yAxes": [{"ticks": {"beginAtZero": False}}]} }
     }
-    encoded_config = urllib.parse.quote(json.dumps(chart_config))
-    return f"https://quickchart.io/chart?c={encoded_config}&w=600&h=400&bkg=white"
+    return f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&w=600&h=400&bkg=white"
 
-
-# === V2.0 UI HELPERS (FEATURE 16 & 17) ===
+# === V2.0 UI HELPERS ===
 def build_card_ui(item, expanded_offers=False):
     platform = item.get('platform', 'Amazon')
     badge = "🟡 [ FLIPKART DEAL ]" if platform == 'Flipkart' else "🟠 [ AMAZON DEAL ]"
     
-    if 'price_history' in item and len(item['price_history']) > 0:
-        current_price = item['price_history'][-1]['price']
-    else:
-        current_price = item.get('start_price', 0)
-        
+    current_price = item['price_history'][-1]['price'] if 'price_history' in item and item['price_history'] else item.get('start_price', 0)
     old_price = item.get('start_price', current_price)
     
     card = f"{badge}\n━━━━━━━━━━━━━━━━━━━━\n📦 **{item['title'][:60]}...**\n\n"
@@ -370,7 +335,6 @@ def get_action_keyboard(index, url, platform):
     markup.row(InlineKeyboardButton("🗑️ Delete", callback_data=f"del_{index}"))
     return markup
 
-
 # === BOT COMMANDS ===
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -378,8 +342,8 @@ def send_welcome(message):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("📋 My Wishlist", callback_data="page_0"))
     markup.row(InlineKeyboardButton("🔄 Refresh All", callback_data="checkall"), InlineKeyboardButton("🗑️ Clear All", callback_data="clearall"))
-    
-    bot.send_photo(message.chat.id, "https://i.imgur.com/k2eA5Q7.png", caption=welcome_msg, parse_mode="Markdown", reply_markup=markup)
+    try: bot.send_photo(message.chat.id, "https://i.imgur.com/k2eA5Q7.png", caption=welcome_msg, parse_mode="Markdown", reply_markup=markup)
+    except: bot.send_message(message.chat.id, welcome_msg, parse_mode="Markdown", reply_markup=markup)
 
 @bot.message_handler(commands=['reset'])
 def reset_data(message):
@@ -397,10 +361,11 @@ def show_checknow_handler(message):
 def show_list(message):
     handle_pagination(message.chat.id, 0)
 
-# === PAGINATION SYSTEM (FEATURE 9) ===
-def handle_pagination(chat_id, page):
+# === PAGINATION SYSTEM (FIXED BUG 2) ===
+def handle_pagination(chat_id_raw, page):
+    chat_id = str(chat_id_raw)
     data = load_data()
-    items = data.get(str(chat_id), [])
+    items = data.get(chat_id, [])
     if not items:
         bot.send_message(chat_id, "📭 Teri Wishlist khali hai! Koi link bhej.")
         return
@@ -428,13 +393,15 @@ def handle_pagination(chat_id, page):
     row = []
     if page > 0: row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page_{page-1}"))
     if page < total_pages - 1: row.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{page+1}"))
-    if row: nav_markup.row(*row)
-    if nav_markup.keyboard: bot.send_message(chat_id, "Navigation:", reply_markup=nav_markup)
+    
+    if row: # FIX 2: Correct navigation condition check
+        nav_markup.row(*row)
+        bot.send_message(chat_id, "Navigation:", reply_markup=nav_markup)
 
-# === CALLBACK HANDLER ===
+# === CALLBACK HANDLER (FIXED BUG 3) ===
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    bot.answer_callback_query(call.id) # BUG 17 FIX
+    bot.answer_callback_query(call.id)
     chat_id = str(call.message.chat.id)
     data = load_data()
     
@@ -470,15 +437,19 @@ def handle_query(call):
             bot.send_photo(chat_id, chart_url, caption=res, parse_mode='Markdown')
             
         elif action == "off":
-            if platform == "Amazon":
-                bot.send_message(chat_id, "🚧 Amazon Offers feature is Coming Soon!")
+            if platform == "Amazon": bot.send_message(chat_id, "🚧 Amazon Offers feature is Coming Soon!")
             else:
                 new_card = build_card_ui(item, expanded_offers=True)
-                bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], item['platform']))
+                try: bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], item['platform']))
+                except: pass
                 
         elif action == "ref":
-            bot.send_message(chat_id, "🔄 Updating Price...")
+            loading_msg = bot.send_message(chat_id, f"🔄 API se daam nikal raha hoon: {item['title'][:20]}...")
             t, p, o, img = check_amazon_price(item['url']) if platform == "Amazon" else check_flipkart_price(item['url'])
+            
+            try: bot.delete_message(chat_id, loading_msg.message_id)
+            except: pass
+            
             if p and p != "OOS":
                 last_price = item['price_history'][-1]['price']
                 if p != last_price:
@@ -486,7 +457,15 @@ def handle_query(call):
                 item['latest_offers'] = o
                 save_data(data)
                 new_card = build_card_ui(item)
-                bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], platform))
+                
+                # FIX 3: Exception handling for "Message is not modified"
+                try:
+                    bot.edit_message_caption(caption=new_card, chat_id=chat_id, message_id=call.message.message_id, parse_mode='Markdown', reply_markup=get_action_keyboard(item_number, item['url'], platform))
+                    bot.send_message(chat_id, f"✅ **Update Success!**")
+                except Exception as e:
+                    bot.send_message(chat_id, f"✅ Daam abhi bhi **₹{p}** hi hai, koi naya badlaav nahi!")
+            else:
+                bot.send_message(chat_id, "⚠️ API Timeout ho gaya ya item OOS hai. Thodi der baad try kar!")
                 
         elif action == "del":
             deleted_item = data[chat_id].pop(item_number)
@@ -495,66 +474,45 @@ def handle_query(call):
             except: pass
             bot.send_message(chat_id, f"🗑️ Maine **{deleted_item['title'][:30]}...** ko hata diya.")
             
-    except Exception as e:
-        pass
+    except Exception as e: pass
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     url = message.text.strip()
     chat_id = str(message.chat.id)
     
-    if "amazon" in url.lower() or "amzn" in url.lower():
-        platform = "Amazon"
-    elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower():
-        platform = "Flipkart"
+    if "amazon" in url.lower() or "amzn" in url.lower(): platform = "Amazon"
+    elif "flipkart" in url.lower() or "fkrt" in url.lower() or "fktr" in url.lower() or "dl.flipkart" in url.lower(): platform = "Flipkart"
     else:
         bot.reply_to(message, "⚠️ Bhai, abhi sirf Amazon aur Flipkart ke links bhej.")
         return
 
-    # FEATURE 5: Auto-delete User Link
     try: bot.delete_message(message.chat.id, message.message_id)
     except: pass
 
     ghost = bot.send_message(message.chat.id, f"🔍 {platform} par data check kar raha hoon... (Heavy page loading, thoda wait kar)")
     
-    current_price = None
-    offers = []
-    title = ""
-    img_url = ""
-    
-    # RESTORED: 2 Attempt Retry Loop
+    current_price, offers, title, img_url = None, [], "", ""
     for attempt in range(2): 
-        if platform == "Amazon":
-            title, current_price, offers, img_url = check_amazon_price(url)
-        else:
-            title, current_price, offers, img_url = check_flipkart_price(url)
-            
-        if current_price: 
-            break 
-        else:
-            time.sleep(3) 
+        if platform == "Amazon": title, current_price, offers, img_url = check_amazon_price(url)
+        else: title, current_price, offers, img_url = check_flipkart_price(url)
+        if current_price: break 
+        else: time.sleep(3) 
 
     try: bot.delete_message(chat_id, ghost.message_id)
     except: pass
 
     if current_price == "OOS":
-        bot.send_message(chat_id, "❌ **Bhai, tera bheja hua variant/color abhi OUT OF STOCK hai!**\nMain galat in-stock variant ka price nahi uthaunga, isliye maine isko list mein add nahi kiya.")
+        bot.send_message(chat_id, "❌ **Bhai, tera bheja hua variant/color abhi OUT OF STOCK hai!**")
         return
 
     if current_price:
         data = load_data()
-        if chat_id not in data:
-            data[chat_id] = []
-            
+        if chat_id not in data: data[chat_id] = []
         new_item = {
-            "url": url,
-            "title": title, 
-            "start_price": current_price,
-            "platform": platform,
+            "url": url, "title": title, "start_price": current_price, "platform": platform,
             "price_history": [{"date": get_current_time_str(), "price": current_price}],
-            "latest_offers": offers,
-            "image_url": img_url,
-            "error_count": 0 
+            "latest_offers": offers, "image_url": img_url, "error_count": 0 
         }
         data[chat_id].append(new_item)
         save_data(data)
@@ -565,10 +523,11 @@ def handle_message(message):
         
         try: bot.send_photo(chat_id, img_url, caption=card_text, parse_mode="Markdown", reply_markup=markup)
         except: bot.send_message(chat_id, card_text, parse_mode="Markdown", reply_markup=markup)
-    else:
-        bot.send_message(chat_id, "⚠️ Bhai lagta hai server thoda busy hai ya timeout ho gaya. Ek baar fir se link bhej de!")
+    else: bot.send_message(chat_id, "⚠️ Bhai lagta hai server thoda busy hai ya timeout ho gaya. Ek baar fir se link bhej de!")
 
-def manual_price_check(chat_id_str):
+# === CHECK ALL (FIXED BUG 1) ===
+def manual_price_check(chat_id_raw):
+    chat_id_str = str(chat_id_raw) # FIX 1: Type mismatch error fix
     bot.send_message(chat_id_str, "⚙️ Backend check shuru kar diya! Prices scrape kar raha hoon, thoda wait kar...")
     data = load_data()
     
@@ -578,13 +537,11 @@ def manual_price_check(chat_id_str):
         
     for i, item in enumerate(data[chat_id_str]):
         platform = item.get('platform', 'Amazon')
-        if platform == "Amazon":
-            title, new_price, offers, img = check_amazon_price(item['url'])
-        elif platform == "Flipkart":
-            title, new_price, offers, img = check_flipkart_price(item['url'])
+        if platform == "Amazon": title, new_price, offers, img = check_amazon_price(item['url'])
+        elif platform == "Flipkart": title, new_price, offers, img = check_flipkart_price(item['url'])
             
         if new_price == "OOS":
-             bot.send_message(chat_id_str, f"🚫 **OUT OF STOCK ALERT**\n{item['title'][:30]}...\nYeh item abhi stock se bahar hai.")
+             bot.send_message(chat_id_str, f"🚫 **OUT OF STOCK ALERT**\n{item['title'][:30]}...")
              continue
              
         if not new_price:
@@ -593,38 +550,29 @@ def manual_price_check(chat_id_str):
             continue
              
         if new_price:
-            last_recorded_price = item.get('price_history', [{'price': item['start_price']}])[-1]['price']
-            
-            if platform == "Flipkart" and offers: 
-                item['latest_offers'] = offers
+            last_recorded_price = item['price_history'][-1]['price'] if 'price_history' in item and item['price_history'] else item.get('start_price', 0)
+            if platform == "Flipkart" and offers: item['latest_offers'] = offers
             
             if new_price != last_recorded_price:
                 item['price_history'].append({"date": get_current_time_str(), "price": new_price})
                 save_data(data)
-                
                 alert_card = f"🚨 **DEAL ALERT! Price Changed**\n{build_card_ui(item)}"
                 try: bot.send_photo(chat_id_str, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
                 except: bot.send_message(chat_id_str, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
     
     bot.send_message(chat_id_str, "✅ Manual check poora ho gaya, report de di maine!")
 
-# === SCHEDULED ROUTINE CHECKER (RESTORED EXPIRY & ERROR ALERT) ===
+# === SCHEDULED ROUTINE CHECKER ===
 def auto_price_checker():
     checked_keys = set()
     while True:
         ist_now = get_ist_time()
-        current_hour = ist_now.hour
-        current_minute = ist_now.minute
-        current_year = ist_now.year 
-        
-        if current_hour in [0, 6, 12, 18] and current_minute < 5:
-            check_key = f"{ist_now.strftime('%Y-%m-%d')}-{current_hour}"
+        if ist_now.hour in [0, 6, 12, 18] and ist_now.minute < 5:
+            check_key = f"{ist_now.strftime('%Y-%m-%d')}-{ist_now.hour}"
             if check_key not in checked_keys:
-                print(f"🔄 Auto-Check start hua (Hour: {current_hour})")
                 data = load_data()
                 changes_made = False
                 
-                # RESTORED: 30-Day Expiry Logic
                 for chat_id in list(data.keys()):
                     valid_items = []
                     for item in data[chat_id]:
@@ -633,42 +581,31 @@ def auto_price_checker():
                             first_date_str = item['price_history'][0]['date']
                             if first_date_str != "Old Data":
                                 try:
-                                    added_date = datetime.strptime(f"{first_date_str} {current_year}", "%d-%b %I:%M %p %Y")
-                                    if (ist_now - added_date).days >= 30:
-                                        is_expired = True
+                                    added_date = datetime.strptime(f"{first_date_str} {ist_now.year}", "%d-%b %I:%M %p %Y")
+                                    if (ist_now - added_date).days >= 30: is_expired = True
                                 except: pass
-                                
                         if is_expired:
                             changes_made = True
-                            try:
-                                bot.send_message(chat_id, f"⏳ **Tracking Expired!**\n30 din poore ho gaye, maine yeh item hata diya hai:\n🗑️ {item['title'][:40]}...")
+                            try: bot.send_message(chat_id, f"⏳ **Tracking Expired!**\n30 din poore ho gaye, maine yeh item hata diya hai:\n🗑️ {item['title'][:40]}...")
                             except: pass
-                        else:
-                            valid_items.append(item) 
-                            
+                        else: valid_items.append(item) 
                     data[chat_id] = valid_items 
                 
                 for chat_id, items in data.items():
                     for i, item in enumerate(items):
                         try:
                             platform = item.get('platform', 'Amazon')
-                            if platform == "Amazon":
-                                title, new_price, offers, img = check_amazon_price(item['url'])
-                            elif platform == "Flipkart":
-                                title, new_price, offers, img = check_flipkart_price(item['url'])
-                            else:
-                                continue
+                            if platform == "Amazon": title, new_price, offers, img = check_amazon_price(item['url'])
+                            elif platform == "Flipkart": title, new_price, offers, img = check_flipkart_price(item['url'])
+                            else: continue
                                 
-                            if new_price == "OOS":
-                                continue
+                            if new_price == "OOS": continue
                                 
-                            # RESTORED: 3-Strike Error Logic
                             if new_price is None:
                                 item['error_count'] = item.get('error_count', 0) + 1
                                 if item['error_count'] == 3:
-                                    try: bot.send_message(chat_id, f"⚠️ *Maintenance Alert:*\nTere product '{item['title'][:30]}...' ka link theek se check nahi ho pa raha.", parse_mode="Markdown")
+                                    try: bot.send_message(chat_id, f"⚠️ *Maintenance Alert:*\nTere product '{item['title'][:30]}...' ka link check nahi ho pa raha.", parse_mode="Markdown")
                                     except: pass
-                                    
                                     if ADMIN_CHAT_ID:
                                         try: bot.send_message(ADMIN_CHAT_ID, f"🚨 *ADMIN ALERT: API FAILED 3 TIMES*\nLink: {item['url']}\nUser: {chat_id}", parse_mode="Markdown")
                                         except: pass
@@ -678,30 +615,20 @@ def auto_price_checker():
                             item['error_count'] = 0
                                 
                             if new_price:
-                                if platform == "Flipkart" and offers: 
-                                    item['latest_offers'] = offers
-                                
-                                if 'price_history' not in item:
-                                    item['price_history'] = [{"date": "Old Data", "price": item.get('start_price', new_price)}]
-                                    
+                                if platform == "Flipkart" and offers: item['latest_offers'] = offers
+                                if 'price_history' not in item: item['price_history'] = [{"date": "Old Data", "price": item.get('start_price', new_price)}]
                                 last_recorded_price = item['price_history'][-1]['price']
                                 
                                 if new_price != last_recorded_price:
-                                    current_time_str = get_current_time_str()
-                                    item['price_history'].append({"date": current_time_str, "price": new_price})
+                                    item['price_history'].append({"date": get_current_time_str(), "price": new_price})
                                     changes_made = True
-                                    
                                     alert_card = f"🚨 **AUTO-DROP DETECTED!**\n{build_card_ui(item)}"
                                     try: bot.send_photo(chat_id, item.get('image_url', "https://i.imgur.com/k2eA5Q7.png"), caption=alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
                                     except: bot.send_message(chat_id, alert_card, parse_mode="Markdown", reply_markup=get_action_keyboard(i, item['url'], platform))
-                        except Exception as e:
-                            print(f"Auto checker error on item: {e}")
-                            pass
+                        except Exception as e: pass
                             
-                if changes_made:
-                    save_data(data)
+                if changes_made: save_data(data)
                 checked_keys.add(check_key)
-                
         time.sleep(60) 
 
 # === START ENGINE ===
