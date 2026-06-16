@@ -187,8 +187,8 @@ def resolve_url(url):
         elif "amazon" in url.lower() or "amzn" in url.lower():
             # Query parameters (?th=1) will not be deleted now
             if parsed.query:
-                return f"https://www.amazon.in{parsed.path}?{parsed.query}"
-            return f"https://www.amazon.in{parsed.path}"
+                return f"https://www.amzn.in{parsed.path}?{parsed.query}"
+            return f"https://www.amzn.in{parsed.path}"
         return url
     except:
         return url
