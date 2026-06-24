@@ -14,7 +14,7 @@ import urllib.parse
 import re
 import uuid 
 
-# === LOGGING SETUP ===
+# === LOGGING CONFIGURATION ===
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -27,7 +27,7 @@ ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "TERA_CHAT_ID_YAHAN_DAAL")
 bot = telebot.TeleBot(BOT_TOKEN)
 DB_PATH = "database.db"
 
-# === DATABASE INITIALIZATION ===
+# === DATABASE SETUP & ATOMIC WRAPPERS ===
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -55,9 +55,8 @@ def init_db():
             )
         """)
         conn.commit()
-    logging.info("SQLite Database initialized.")
+    logging.info("SQLite Database initialized successfully.")
 
-# === DATABASE UTILITY FUNCTIONS ===
 def db_add_item(chat_id, item_id, url, title, platform, start_price, offers, image_url, date_str):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -148,7 +147,7 @@ try:
 except Exception as e:
     logging.error(f"Menu set karne mein error: {e}")
 
-# === FLASK SETUP ===
+# === FLASK DASHBOARD SETUP ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -259,10 +258,10 @@ def extract_smart_price(text):
         return p
     return None
 
-# 🚀 BUG FIX 1: Canonical Redirect Resolver for Amazon & Flipkart
+# Canonical Redirect Resolver for Amazon & Flipkart (Handles "amzn" and "a.co" short links)
 def resolve_url(url):
     try:
-        if any(domain in url.lower() for domain in ["amzn.", "a.co", "dl.flipkart", "flipkart.com/s/"]):
+        if any(domain in url.lower() for domain in ["amzn", "a.co", "dl.flipkart", "flipkart.com/s/"]):
             res = requests.head(url, allow_redirects=True, headers=HEADERS, timeout=10)
             url = res.url
 
@@ -647,7 +646,6 @@ def handle_query(call):
             
             if p == "OOS":
                 db_update_item_state(item_id, is_oos=True)
-                updated_item = db_get_item(item_id)
                 bot.send_message(chat_id, f"🚫 **OUT OF STOCK ALERT**\nBhai tera item OOS ho chuka hai.")
             elif p:
                 db_update_item_state(item_id, error_count=0, is_oos=False, offers=o)
